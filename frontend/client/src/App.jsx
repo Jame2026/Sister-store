@@ -1124,11 +1124,9 @@ function ShopInterface() {
                     )}
                   </div>
                   <div className="featured-card__body">
-                    <div className="featured-card__meta">
+                    <div className="featured-card__meta-row">
                       <span>{product.sold || 0} sold</span>
                       <strong>{product.price}</strong>
-                    </div>
-                    <div className="catalog-card__labels">
                       {product.discountBanner && (
                         <span className="mini-badge mini-badge--discount">{product.discountBanner}</span>
                       )}
