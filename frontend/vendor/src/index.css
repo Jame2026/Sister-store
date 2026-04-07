@@ -2500,7 +2500,7 @@ a {
   .vendor-table td::before {
     content: attr(data-label);
     color: var(--text-muted);
-    font-size: 0.74rem;
+    font-size: 6px;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -2622,6 +2622,55 @@ a {
     padding: 16px;
   }
 
+  .sidebar-nav {
+    display: flex !important;
+    flex-direction: row !important;
+    padding: 4px 12px !important;
+    gap: 12px !important;
+    background: var(--surface) !important;
+    border-bottom: 2px solid var(--border) !important;
+    position: sticky !important;
+    top: 72px !important; /* Under topbar */
+    z-index: 9 !important;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-item {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: auto !important;
+    height: 32px !important;
+    padding: 0 8px !important;
+    gap: 4px !important;
+    white-space: nowrap !important;
+    border-radius: 6px !important;
+  }
+
+  .nav-item span:not(.lucide), 
+  .nav-item {
+    font-size: 6px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+  }
+
+  .nav-item svg {
+    width: 10px !important;
+    height: 10px !important;
+  }
+
+  .nav-label {
+    display: none !important;
+  }
+
   .vendor-workspace-nav__item,
   .vendor-side-actions button,
   .vendor-page-actions button,
@@ -2666,12 +2715,12 @@ a {
   }
 
   .vendor-mobile-summary-chip small {
-    font-size: 0.58rem;
+    font-size: 5px;
     letter-spacing: 0.06em;
   }
 
   .vendor-mobile-summary-chip strong {
-    font-size: 0.72rem;
+    font-size: 7px;
   }
 
   .vendor-table td {
@@ -2685,7 +2734,11 @@ a {
     align-items: stretch;
   }
 
+  .vendor-mobile-context span {
+    font-size: 5px !important;
+  }
+  
   .vendor-mobile-context strong {
-    font-size: 0.94rem;
+    font-size: 8px;
   }
 }

@@ -1249,7 +1249,9 @@ function ShopInterface() {
                   </div>
 
                   <div className="catalog-card__body">
-                    <div className="catalog-card__labels">
+                    <div className="featured-card__meta-row">
+                      <span>{product.sold || 0} sold</span>
+                      <strong>{product.price}</strong>
                       {product.discountBanner && (
                         <span className="mini-badge mini-badge--discount">{product.discountBanner}</span>
                       )}
@@ -1260,20 +1262,11 @@ function ShopInterface() {
                       >
                         {formatStockLabel(getProductStock(product))}
                       </span>
-                      <span className="mini-badge">
-                        {Number(product.sold || 0) > 0 ? 'Popular item' : 'New item'}
-                      </span>
-                      {product.imageUrl && (
-                        <span className="mini-badge mini-badge--soft">Photo included</span>
-                      )}
                     </div>
 
                     <div className="catalog-card__heading">
-                      <div>
-                        <h3>{product.name}</h3>
-                        <p>{product.desc || 'Ask the vendor directly for more details about this product.'}</p>
-                      </div>
-                      <strong>{product.price}</strong>
+                      <h3>{product.name}</h3>
+                      <p>{product.desc || 'Ask the vendor directly for more details about this product.'}</p>
                     </div>
 
                     <div className="product-card-actions">
