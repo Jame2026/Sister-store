@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   Copy,
+  Eye,
+  EyeOff,
   ExternalLink,
   Globe,
   ImagePlus,
@@ -17,8 +19,23 @@ import {
 } from 'lucide-react';
 
 const TOKEN_STORAGE_KEY = 'vendor_auth_token';
-const EMPTY_AUTH = { email: '', password: '', confirmPassword: '' };
-const EMPTY_SHOP = { name: '', description: '', location: '', telegram: '', logoImageUrl: '' };
+const EMPTY_AUTH = {
+  email: '',
+  password: '',
+  confirmPassword: '',
+  resetCode: '',
+  subscriptionPlan: 'monthly',
+};
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '')
+).replace(/\/$/, '');
+const EMPTY_SHOP = {
+  name: '',
+  description: '',
+  location: '',
+  telegram: '',
+  logoImageUrl: '',
+};
 const EMPTY_PRODUCT = { name: '', price: '', desc: '', discountBanner: '', stock: '0' };
 const EMPTY_ANALYTICS = {
   totalBookings: 0,
@@ -76,6 +93,53 @@ const secondaryButtonStyle = {
   border: '1px solid #334155',
   color: '#e2e8f0',
 };
+
+const passwordFieldShellStyle = {
+  position: 'relative',
+};
+
+const passwordToggleButtonStyle = {
+  position: 'absolute',
+  top: '50%',
+  right: '12px',
+  transform: 'translateY(-50%)',
+  background: 'transparent',
+  border: 'none',
+  color: '#94a3b8',
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+  padding: '4px',
+};
+
+const vendorSubscriptionPlans = [
+  {
+    code: 'monthly',
+    title: 'Monthly access',
+    priceLabel: '$10',
+    cadenceLabel: 'per month',
+    helper: 'Flexible start for new vendors.',
+  },
+  {
+    code: 'yearly',
+    title: 'Yearly access',
+    priceLabel: '$100',
+    cadenceLabel: 'per year',
+    helper: 'Best value for long-term shops.',
+  },
+];
+
+function resolveApiAssetUrl(path) {
+  if (!path) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  return `${API_BASE_URL}${path}`;
+}
 
 function slugify(value) {
   return String(value || '')
@@ -161,6 +225,10 @@ async function readApiResponse(response) {
   return payload;
 }
 
+function apiUrl(path) {
+  return `${API_BASE_URL}${path}`;
+}
+
 function previewUrl(file) {
   return file ? URL.createObjectURL(file) : '';
 }
@@ -242,6 +310,13 @@ export default function VendorApp() {
   const [authForm, setAuthForm] = useState(EMPTY_AUTH);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [resetDetails, setResetDetails] = useState(null);
+  const [paymentQrError, setPaymentQrError] = useState('');
+  const [showRegistrationQr, setShowRegistrationQr] = useState(false);
+  const [passwordVisibility, setPasswordVisibility] = useState({
+    password: false,
+    confirmPassword: false,
+  });
   const [activeView, setActiveView] = useState('overview');
 
   const [token, setToken] = useState('');
@@ -250,6 +325,7 @@ export default function VendorApp() {
   const [loading, setLoading] = useState(false);
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [recentBookings, setRecentBookings] = useState([]);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   const [shopId, setShopId] = useState('');
   const [shopHandleDraft, setShopHandleDraft] = useState('');
@@ -268,6 +344,7 @@ export default function VendorApp() {
 
   const logoInputRef = useRef(null);
   const productInputRef = useRef(null);
+  const accountMenuRef = useRef(null);
   const [logoPreview, setLogoPreview] = useState('');
   const [productPreview, setProductPreview] = useState('');
 
@@ -280,6 +357,85 @@ export default function VendorApp() {
     normalizedHandleDraft || (!hasShop ? slugify(shopForm.name) : '') || shopId;
   const displayHandle = resolvedHandle || 'your-handle';
   const displayLogoText = initials(shopForm.name || account?.email || 'Sister Store');
+  const vendorApproval = account?.approval || {
+    code: 'pending',
+    label: 'Pending Approval',
+    approvedAt: null,
+    canPublishProducts: false,
+  };
+  const canPublishProducts = Boolean(vendorApproval.canPublishProducts);
+  const currentSubscription = account?.subscription || null;
+  const selectedSubscriptionPlan =
+    vendorSubscriptionPlans.find((plan) => plan.code === authForm.subscriptionPlan) ||
+    vendorSubscriptionPlans[0];
+  const paymentQr = resolveApiAssetUrl('/uploads/image.png');
+  const subscriptionSummary = currentSubscription
+    ? `${currentSubscription.priceLabel}${
+        currentSubscription.endsAt ? ` | Active until ${formatDateTime(currentSubscription.endsAt)}` : ''
+      }`
+    : 'Choose a plan';
+  const approvalSummary = canPublishProducts
+    ? vendorApproval.approvedAt
+      ? `Approved on ${formatDateTime(vendorApproval.approvedAt)}`
+      : 'Approved by admin'
+    : 'Waiting for admin approval before product uploads are enabled';
+  const catalogStatusTone = canPublishProducts ? 'is-good' : 'is-warning';
+  const catalogWorkspaceTitle = editingProductId
+    ? 'Update a product that is already in your catalog'
+    : 'Manage the products customers will browse in your storefront';
+  const catalogWorkspaceDescription = canPublishProducts
+    ? 'Add products, keep stock current, and review the customer-facing preview before publishing.'
+    : 'Prepare the product details here now, then publish them as soon as admin approval is complete.';
+  const catalogFocusPills = canPublishProducts
+    ? ['Add products', 'Update stock', 'Review preview']
+    : ['Prepare details', 'Review preview', 'Wait for approval'];
+  const catalogStatusTitle = canPublishProducts
+    ? 'Publishing is unlocked'
+    : 'Publishing is waiting for approval';
+  const catalogStatusDescription = canPublishProducts
+    ? 'This workspace is fully active. You can add, update, and remove products from here.'
+    : 'You can prepare product information now, but the publish button will stay locked until an admin approves your vendor account.';
+  const catalogActionGroups = canPublishProducts
+    ? [
+        {
+          title: 'Use this workspace to',
+          items: [
+            'Add or update products with price, stock, and image',
+            'Keep the storefront accurate as inventory changes',
+          ],
+        },
+        {
+          title: 'Before publishing',
+          items: [
+            'Check the preview card customers will see',
+            'Use clear descriptions and discount labels when needed',
+          ],
+        },
+      ]
+    : [
+        {
+          title: 'You can do now',
+          items: [
+            'Complete the name, price, stock, image, and description',
+            'Review the customer preview before products go live',
+          ],
+        },
+        {
+          title: 'Unlocks after approval',
+          items: [
+            'Publish products to the storefront',
+            'Edit or remove live catalog items anytime',
+          ],
+        },
+      ];
+  const catalogSubmitTitle = canPublishProducts
+    ? editingProductId
+      ? 'Save the updated product information'
+      : 'Publish this product to your storefront'
+    : 'Finish the draft while approval is pending';
+  const catalogSubmitDescription = canPublishProducts
+    ? 'Publishing makes the product visible in your storefront, so customers can browse and order it.'
+    : 'You can prepare the full draft now. The publish action will unlock automatically after admin approval.';
   const previewTelegram = shopForm.telegram
     ? `@${shopForm.telegram.replace(/^@+/, '')}`
     : '@yourtelegram';
@@ -287,37 +443,35 @@ export default function VendorApp() {
   const setupChecklist = useMemo(
     () => [
       {
-        label: 'Account ready',
+        label: 'Account',
         done: Boolean(account?.email),
-        hint: account?.email || 'Sign in to your vendor account',
+        hint: account?.email ? 'Signed in' : 'Sign in',
       },
       {
-        label: 'Store details',
+        label: 'Store',
         done: hasShop,
-        hint: hasShop
-          ? `${shopForm.name || 'Store'} is saved`
-          : 'Add store name, location, and Telegram',
+        hint: hasShop ? 'Saved' : 'Add info',
       },
       {
-        label: 'Products added',
+        label: 'Products',
         done: products.length > 0,
         hint:
           products.length > 0
-            ? `${products.length} product${products.length === 1 ? '' : 's'} live`
-            : 'Add your first product',
+            ? `${products.length} live`
+            : 'Add one',
       },
       {
-        label: 'Link ready',
+        label: 'Share',
         done: hasShop && products.length > 0,
         hint:
           hasShop && products.length > 0
-            ? 'Store link is ready to share'
+            ? 'Ready'
             : hasShop
-              ? 'Add a product before sharing'
-              : 'Save your store profile first',
+              ? 'Add product'
+              : 'Save store',
       },
     ],
-    [account?.email, hasShop, products.length, shopForm.name]
+    [account?.email, hasShop, products.length]
   );
   const setupCompleteCount = setupChecklist.filter((item) => item.done).length;
   const setupProgress = Math.round((setupCompleteCount / setupChecklist.length) * 100);
@@ -369,8 +523,17 @@ export default function VendorApp() {
       : profileProgress >= 80
         ? 'Almost ready'
         : profileProgress >= 50
-          ? 'Needs a few details'
-          : 'Start adding details';
+        ? 'Needs a few details'
+        : 'Start adding details';
+  const storeDetailsReadyLabel = `${profileCompleteCount}/${profileChecklist.length} details ready`;
+  const storePageStatusLabel = hasShop ? 'Shop page saved' : 'Shop page not saved yet';
+  const draftedShopLinkSummary =
+    displayHandle !== 'your-handle'
+      ? `Shop link: /${displayHandle}`
+      : 'Your shop link will appear here after you save.';
+  const storefrontSummary = hasShop
+    ? 'This is the page customers will open when they visit your shop.'
+    : 'Fill in these details to create the page customers will open.';
   const totalStock = useMemo(
     () => products.reduce((sum, product) => sum + Number(product.stock || 0), 0),
     [products]
@@ -543,10 +706,10 @@ export default function VendorApp() {
   );
   const workspaceTabs = useMemo(
     () => [
-      { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'store', label: 'Store Profile', icon: Store },
-      { id: 'catalog', label: 'Products', icon: Package2 },
-      { id: 'share', label: 'Share Store', icon: Globe },
+      { id: 'overview', label: 'Dashboard', mobileLabel: 'Dash', icon: LayoutDashboard },
+      { id: 'store', label: 'Store Profile', mobileLabel: 'Profile', icon: Store },
+      { id: 'catalog', label: 'Products', mobileLabel: 'Product', icon: Package2 },
+      { id: 'share', label: 'Share Store', mobileLabel: 'Share', icon: Globe },
     ],
     []
   );
@@ -560,13 +723,15 @@ export default function VendorApp() {
         }
       : activeView === 'catalog'
         ? {
-            label: savingProduct
-              ? 'Saving...'
-              : editingProductId
-                ? 'Update Product'
-                : 'Add Product',
+            label: !canPublishProducts
+              ? 'Waiting for Approval'
+              : savingProduct
+                ? 'Saving...'
+                : editingProductId
+                  ? 'Update Product'
+                  : 'Add Product',
             onClick: submitProduct,
-            disabled: savingProduct,
+            disabled: savingProduct || !canPublishProducts,
           }
         : activeView === 'share'
           ? {
@@ -635,16 +800,80 @@ export default function VendorApp() {
   }
 
   function clearSession(message = '') {
+    setAccountMenuOpen(false);
     setStoredToken('');
     setToken('');
     setAccount(null);
     setAuthError('');
+    setResetDetails(null);
+    setShowRegistrationQr(false);
+    setPasswordVisibility({
+      password: false,
+      confirmPassword: false,
+    });
     setAuthForm(EMPTY_AUTH);
     setActiveView('overview');
     resetWorkspace();
     if (message) {
       setNotice(message);
     }
+  }
+
+  function switchAuthMode(nextMode) {
+    setAuthMode(nextMode);
+    setAuthError('');
+    setResetDetails(null);
+    setShowRegistrationQr(false);
+    setPasswordVisibility({
+      password: false,
+      confirmPassword: false,
+    });
+    setAuthForm((current) => ({
+      ...EMPTY_AUTH,
+      email: current.email,
+      subscriptionPlan: current.subscriptionPlan || EMPTY_AUTH.subscriptionPlan,
+    }));
+  }
+
+  function togglePasswordVisibility(field) {
+    setPasswordVisibility((current) => ({
+      ...current,
+      [field]: !current[field],
+    }));
+  }
+
+  function renderAuthPasswordInput(field, placeholder) {
+    const isVisible = passwordVisibility[field];
+
+    return (
+      <div style={passwordFieldShellStyle}>
+        <input
+          style={{
+            ...inputStyle,
+            paddingRight: '48px',
+          }}
+          type={isVisible ? 'text' : 'password'}
+          placeholder={placeholder}
+          value={authForm[field]}
+          onChange={(event) => {
+            if (authMode === 'register' && showRegistrationQr) {
+              setShowRegistrationQr(false);
+              setNotice('');
+            }
+
+            setAuthForm((current) => ({ ...current, [field]: event.target.value }));
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => togglePasswordVisibility(field)}
+          aria-label={isVisible ? `Hide ${placeholder}` : `Show ${placeholder}`}
+          style={passwordToggleButtonStyle}
+        >
+          {isVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+        </button>
+      </div>
+    );
   }
 
   function hydrateWorkspace(payload) {
@@ -680,7 +909,7 @@ export default function VendorApp() {
 
     const headers = new Headers(options.headers || {});
     headers.set('Authorization', `Bearer ${activeToken}`);
-    return fetch(url, { ...options, headers });
+    return fetch(apiUrl(url), { ...options, headers });
   }
 
   useEffect(() => {
@@ -697,7 +926,13 @@ export default function VendorApp() {
         const payload = await readApiResponse(await authedFetch('/api/vendor/me', {}, storedToken));
         setToken(storedToken);
         hydrateWorkspace(payload);
-        setNotice(payload.shop ? 'Signed in. Your vendor workspace is ready.' : 'Signed in. Create your shop to start selling.');
+        setNotice(
+          payload.account?.approval?.canPublishProducts
+            ? payload.shop
+              ? 'Signed in. Your vendor workspace is ready.'
+              : 'Signed in. Create your shop to start selling.'
+            : 'Signed in. Your vendor account is waiting for admin approval before products can be uploaded.'
+        );
       } catch {
         clearSession('Your previous session expired. Please sign in again.');
       } finally {
@@ -709,27 +944,135 @@ export default function VendorApp() {
     restoreSession();
   }, []);
 
+  useEffect(() => {
+    if (!accountMenuOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (!accountMenuRef.current?.contains(event.target)) {
+        setAccountMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setAccountMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [accountMenuOpen]);
+
   async function handleAuthSubmit(event) {
     event.preventDefault();
-    setAuthBusy(true);
     setAuthError('');
     setNotice('');
+    const submittedEmail = authForm.email.trim();
 
     try {
-      if (authMode === 'register' && authForm.password !== authForm.confirmPassword) {
-        throw new Error('Passwords do not match.');
+      if (authMode === 'forgot') {
+        setAuthBusy(true);
+
+        if (!resetDetails) {
+          const payload = await readApiResponse(
+            await fetch(apiUrl('/api/vendor/auth/forgot-password'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: submittedEmail,
+              }),
+            })
+          );
+
+          setResetDetails({
+            delivery: payload.delivery || 'manual',
+            resetCode: payload.resetCode,
+            expiresAt: payload.expiresAt,
+          });
+          setAuthForm((current) => ({
+            ...current,
+            password: '',
+            confirmPassword: '',
+            resetCode: '',
+          }));
+          setNotice(payload.message);
+          return;
+        }
+
+        if (authForm.password !== authForm.confirmPassword) {
+          throw new Error('Passwords do not match.');
+        }
+
+        const payload = await readApiResponse(
+          await fetch(apiUrl('/api/vendor/auth/reset-password'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: submittedEmail,
+              resetCode: authForm.resetCode,
+              password: authForm.password,
+            }),
+          })
+        );
+
+        setResetDetails(null);
+        setAuthMode('login');
+        setAuthForm({
+          ...EMPTY_AUTH,
+          email: submittedEmail,
+        });
+        setNotice(payload.message);
+        return;
       }
 
+      if (authMode === 'register') {
+        if (!/\S+@\S+\.\S+/.test(submittedEmail)) {
+          throw new Error('Enter a valid email address before continuing.');
+        }
+
+        if (authForm.password.length < 6) {
+          throw new Error('Password must be at least 6 characters long.');
+        }
+
+        if (authForm.password !== authForm.confirmPassword) {
+          throw new Error('Passwords do not match.');
+        }
+
+        if (!showRegistrationQr) {
+          setPaymentQrError('');
+          setShowRegistrationQr(true);
+          setNotice(
+            `Your details look good. Scan the QR for ${selectedSubscriptionPlan.priceLabel} ${selectedSubscriptionPlan.cadenceLabel}, then click "I Paid, Create Vendor Account" to finish.`
+          );
+          return;
+        }
+
+        if (paymentQrError) {
+          throw new Error(paymentQrError);
+        }
+      }
+
+      setAuthBusy(true);
       const endpoint =
         authMode === 'register' ? '/api/vendor/auth/register' : '/api/vendor/auth/login';
 
       const payload = await readApiResponse(
-        await fetch(endpoint, {
+        await fetch(apiUrl(endpoint), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: authForm.email,
+            email: submittedEmail,
             password: authForm.password,
+            subscriptionPlan: authForm.subscriptionPlan,
           }),
         })
       );
@@ -738,9 +1081,10 @@ export default function VendorApp() {
       setToken(payload.token);
       hydrateWorkspace(payload);
       setAuthForm(EMPTY_AUTH);
+      setShowRegistrationQr(false);
       setNotice(
         authMode === 'register'
-          ? 'Vendor account created. You can set up your shop now.'
+          ? `Vendor account created on ${payload.account?.subscription?.priceLabel || 'your selected plan'}. Please wait for admin approval before uploading products.`
           : 'Signed in. Your vendor workspace is ready.'
       );
     } catch (error) {
@@ -873,6 +1217,11 @@ export default function VendorApp() {
   }
 
   async function submitProduct() {
+    if (!canPublishProducts) {
+      setNotice('Your vendor account is still waiting for admin approval before products can be published.');
+      return;
+    }
+
     if (!productForm.name.trim() || !productForm.price.trim()) {
       setNotice('Product name and price are required.');
       return;
@@ -928,6 +1277,11 @@ export default function VendorApp() {
   }
 
   function startEdit(product) {
+    if (!canPublishProducts) {
+      setNotice('Admin approval is required before you can manage products.');
+      return;
+    }
+
     setEditingProductId(product.id);
     setEditingImageUrl(product.imageUrl || '');
     setProductForm({
@@ -946,6 +1300,11 @@ export default function VendorApp() {
   }
 
   async function deleteProduct(productId, productName = 'this product') {
+    if (!canPublishProducts) {
+      setNotice('Admin approval is required before you can manage products.');
+      return;
+    }
+
     if (!productId) {
       return;
     }
@@ -1000,9 +1359,11 @@ export default function VendorApp() {
   function openShopPreview() {
     if (!shopLink) {
       setNotice('Create your shop first to unlock the public link.');
+      setAccountMenuOpen(false);
       return;
     }
 
+    setAccountMenuOpen(false);
     window.open(shopLink, '_blank', 'noopener,noreferrer');
   }
 
@@ -1056,63 +1417,226 @@ export default function VendorApp() {
               <button
                 className={`vendor-toggle-btn ${authMode === 'register' ? 'is-active' : ''}`}
                 type="button"
-                onClick={() => {
-                  setAuthMode('register');
-                  setAuthError('');
-                }}
+                onClick={() => switchAuthMode('register')}
               >
                 Register
               </button>
               <button
-                className={`vendor-toggle-btn ${authMode === 'login' ? 'is-active' : ''}`}
+                className={`vendor-toggle-btn ${authMode !== 'register' ? 'is-active' : ''}`}
                 type="button"
-                onClick={() => {
-                  setAuthMode('login');
-                  setAuthError('');
-                }}
+                onClick={() => switchAuthMode('login')}
               >
-                Sign In
+                {authMode === 'forgot' ? 'Reset' : 'Sign In'}
               </button>
             </div>
 
             <h2 style={{ marginTop: 0 }}>
-              {authMode === 'register' ? 'Create Vendor Account' : 'Sign In To Workspace'}
+              {authMode === 'register'
+                ? 'Create Vendor Account'
+                : authMode === 'forgot'
+                  ? 'Reset Vendor Password'
+                  : 'Sign In To Workspace'}
             </h2>
             <p style={{ color: '#94a3b8', marginTop: '-6px' }}>
               {authMode === 'register'
                 ? 'Start your own vendor workspace.'
-                : 'Continue managing your storefront.'}
+                : authMode === 'forgot'
+                  ? 'Request a reset code with your email, then set a new password.'
+                  : 'Continue managing your storefront.'}
             </p>
 
             <form onSubmit={handleAuthSubmit} style={{ display: 'grid', gap: '12px' }}>
+              {authMode === 'register' && (
+                <div style={{ display: 'grid', gap: '10px' }}>
+                  <span style={{ color: '#cbd5e1', fontWeight: 600, fontSize: '14px' }}>
+                    Choose vendor access plan
+                  </span>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                      gap: '10px',
+                    }}
+                  >
+                    {vendorSubscriptionPlans.map((plan) => {
+                      const isActive = authForm.subscriptionPlan === plan.code;
+
+                      return (
+                        <button
+                          key={plan.code}
+                          type="button"
+                          onClick={() => {
+                            if (showRegistrationQr) {
+                              setShowRegistrationQr(false);
+                              setNotice('');
+                            }
+
+                            setAuthForm((current) => ({
+                              ...current,
+                              subscriptionPlan: plan.code,
+                            }));
+                          }}
+                          style={{
+                            textAlign: 'left',
+                            borderRadius: '14px',
+                            border: isActive
+                              ? '1px solid rgba(96, 165, 250, 0.85)'
+                              : '1px solid #334155',
+                            background: isActive ? 'rgba(37, 99, 235, 0.18)' : '#0f172a',
+                            color: '#f8fafc',
+                            padding: '14px',
+                            cursor: 'pointer',
+                            display: 'grid',
+                            gap: '6px',
+                          }}
+                        >
+                          <strong>{plan.title}</strong>
+                          <span style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+                            {plan.priceLabel}
+                          </span>
+                          <span style={{ color: '#bfdbfe', fontSize: '13px' }}>
+                            {plan.cadenceLabel}
+                          </span>
+                          <small style={{ color: '#94a3b8' }}>{plan.helper}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {showRegistrationQr && (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gap: '12px',
+                        borderRadius: '16px',
+                        border: '1px solid rgba(96, 165, 250, 0.28)',
+                        background: 'rgba(37, 99, 235, 0.08)',
+                        padding: '16px',
+                      }}
+                    >
+                      <div style={{ display: 'grid', gap: '4px' }}>
+                        <strong style={{ color: '#f8fafc' }}>
+                          Pay with QR before registration
+                        </strong>
+                        <span style={{ color: '#bfdbfe', fontSize: '14px' }}>
+                          Selected plan: {selectedSubscriptionPlan.priceLabel}{' '}
+                          {selectedSubscriptionPlan.cadenceLabel}
+                        </span>
+                        <small style={{ color: '#94a3b8' }}>
+                          Scan the QR below to pay for your vendor plan, then click "I Paid,
+                          Create Vendor Account" to finish with the same email.
+                        </small>
+                      </div>
+
+                      {!paymentQrError ? (
+                        <div
+                          style={{
+                            display: 'grid',
+                            placeItems: 'center',
+                            borderRadius: '14px',
+                            background: '#ffffff',
+                            padding: '14px',
+                          }}
+                        >
+                          <img
+                            src={paymentQr}
+                            alt="Vendor payment QR code"
+                            onError={() =>
+                              setPaymentQrError(
+                                'The payment QR image could not be loaded from backend/uploads/image.png.'
+                              )
+                            }
+                            style={{
+                              width: '100%',
+                              maxWidth: '240px',
+                              height: 'auto',
+                              display: 'block',
+                              borderRadius: '10px',
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            borderRadius: '14px',
+                            border: '1px dashed rgba(148, 163, 184, 0.35)',
+                            padding: '14px',
+                            color: '#94a3b8',
+                            fontSize: '14px',
+                          }}
+                        >
+                          {paymentQrError}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <input
                 style={inputStyle}
                 type="email"
                 placeholder="Email"
                 value={authForm.email}
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, email: event.target.value }))
-                }
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+                  if (authMode === 'forgot' && resetDetails) {
+                    setResetDetails(null);
+                  }
+                  if (authMode === 'register' && showRegistrationQr) {
+                    setShowRegistrationQr(false);
+                    setNotice('');
+                  }
+                  setAuthForm((current) => ({ ...current, email: nextEmail }));
+                }}
               />
-              <input
-                style={inputStyle}
-                type="password"
-                placeholder="Password"
-                value={authForm.password}
-                onChange={(event) =>
-                  setAuthForm((current) => ({ ...current, password: event.target.value }))
-                }
-              />
-              {authMode === 'register' && (
+              {(authMode !== 'forgot' || resetDetails) && (
+                renderAuthPasswordInput(
+                  'password',
+                  authMode === 'forgot' ? 'New Password' : 'Password'
+                )
+              )}
+              {authMode === 'forgot' && resetDetails && (
                 <input
                   style={inputStyle}
-                  type="password"
-                  placeholder="Confirm Password"
-                  value={authForm.confirmPassword}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="6-digit reset code"
+                  value={authForm.resetCode}
                   onChange={(event) =>
-                    setAuthForm((current) => ({ ...current, confirmPassword: event.target.value }))
+                    setAuthForm((current) => ({ ...current, resetCode: event.target.value }))
                   }
                 />
+              )}
+              {(authMode === 'register' || (authMode === 'forgot' && resetDetails)) && (
+                renderAuthPasswordInput('confirmPassword', 'Confirm Password')
+              )}
+              {authMode === 'forgot' && resetDetails && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(96, 165, 250, 0.35)',
+                    background: 'rgba(37, 99, 235, 0.12)',
+                    color: '#dbeafe',
+                    display: 'grid',
+                    gap: '6px',
+                  }}
+                >
+                  {resetDetails.resetCode ? (
+                    <>
+                      <strong>Reset code: {resetDetails.resetCode}</strong>
+                      <span style={{ fontSize: '13px', color: '#bfdbfe' }}>
+                        Email delivery is not set up yet, so the code is shown here for now. It
+                        expires at {new Date(resetDetails.expiresAt).toLocaleString()}.
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: '13px', color: '#bfdbfe' }}>
+                      A reset code was sent to your email. Enter that code below before{' '}
+                      {new Date(resetDetails.expiresAt).toLocaleString()}.
+                    </span>
+                  )}
+                </div>
               )}
               {notice && <div className="vendor-banner">{notice}</div>}
               {authError && <div className="vendor-banner vendor-banner--error">{authError}</div>}
@@ -1120,9 +1644,49 @@ export default function VendorApp() {
                 {authBusy
                   ? 'Working...'
                   : authMode === 'register'
-                    ? 'Create Vendor Account'
-                    : 'Sign In'}
+                    ? showRegistrationQr
+                      ? 'I Paid, Create Vendor Account'
+                      : 'Create Vendor Account'
+                    : authMode === 'forgot'
+                      ? resetDetails
+                        ? 'Reset Password'
+                        : 'Get Reset Code'
+                      : 'Sign In'}
               </button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                {authMode === 'login' && (
+                  <button
+                    type="button"
+                    onClick={() => switchAuthMode('forgot')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#93c5fd',
+                      padding: 0,
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                )}
+                {authMode === 'forgot' && (
+                  <button
+                    type="button"
+                    onClick={() => switchAuthMode('login')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#93c5fd',
+                      padding: 0,
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Back to sign in
+                  </button>
+                )}
+              </div>
             </form>
           </div>
         </div>
@@ -1158,27 +1722,6 @@ export default function VendorApp() {
               </button>
             );
           })}
-
-          <p className="nav-label" style={{ marginTop: '24px' }}>
-            ACCOUNT
-          </p>
-          <button
-            type="button"
-            className="nav-item vendor-nav-button"
-            onClick={openShopPreview}
-            disabled={!shopLink}
-          >
-            <ExternalLink size={20} />
-            <span>Preview Store</span>
-          </button>
-          <button
-            type="button"
-            className="nav-item vendor-nav-button"
-            onClick={() => clearSession()}
-          >
-            <LogOut size={20} />
-            <span>Sign Out</span>
-          </button>
         </nav>
 
         <div className="vendor-sidebar-card">
@@ -1206,7 +1749,39 @@ export default function VendorApp() {
               <Bell size={20} />
               <span className="badge"></span>
             </button>
-            <div className="avatar">{accountInitials}</div>
+            <div className="vendor-account-menu" ref={accountMenuRef}>
+              <button
+                type="button"
+                className="vendor-account-trigger"
+                aria-haspopup="menu"
+                aria-expanded={accountMenuOpen}
+                onClick={() => setAccountMenuOpen((current) => !current)}
+              >
+                <div className="avatar">{accountInitials}</div>
+              </button>
+              {accountMenuOpen && (
+                <div className="vendor-account-dropdown" role="menu">
+                  <p className="vendor-account-dropdown__label">Account</p>
+                  <button
+                    type="button"
+                    className="nav-item vendor-nav-button vendor-account-dropdown__item"
+                    onClick={openShopPreview}
+                    disabled={!shopLink}
+                  >
+                    <ExternalLink size={18} />
+                    <span>Preview Store</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-item vendor-nav-button vendor-account-dropdown__item"
+                    onClick={() => clearSession()}
+                  >
+                    <LogOut size={18} />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -1214,7 +1789,7 @@ export default function VendorApp() {
           <div className="vendor-mobile-nav">
             <section className="vendor-mobile-nav-section">
               <p className="vendor-mobile-nav-label">Main</p>
-              <div className="vendor-mobile-nav-list">
+              <div className="vendor-mobile-nav-list vendor-mobile-nav-list--main">
                 {workspaceTabs.map((tab) => {
                   const Icon = tab.icon;
 
@@ -1226,63 +1801,15 @@ export default function VendorApp() {
                       onClick={() => setActiveView(tab.id)}
                     >
                       <Icon size={18} />
-                      <span>{tab.label}</span>
+                      <span>{tab.mobileLabel || tab.label}</span>
                     </button>
                   );
                 })}
               </div>
             </section>
-
-            <section className="vendor-mobile-nav-section">
-              <p className="vendor-mobile-nav-label">Account</p>
-              <div className="vendor-mobile-nav-list">
-                <button
-                  type="button"
-                  className="nav-item vendor-nav-button vendor-mobile-nav-button"
-                  onClick={openShopPreview}
-                  disabled={!shopLink}
-                >
-                  <ExternalLink size={18} />
-                  <span>Preview Store</span>
-                </button>
-                <button
-                  type="button"
-                  className="nav-item vendor-nav-button vendor-mobile-nav-button"
-                  onClick={() => clearSession()}
-                >
-                  <LogOut size={18} />
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            </section>
           </div>
 
           <section className="vendor-mobile-shell">
-            <div className="vendor-mobile-shell__head">
-              <div className="vendor-mobile-shell__brand">
-                <span>Vendor Workspace</span>
-                <strong>{account?.email || 'Vendor account owner'}</strong>
-                <small>{nextAction.label}</small>
-              </div>
-              <div className="vendor-pill">
-                <Sparkles size={14} />
-                <span>{setupProgress}% ready</span>
-              </div>
-            </div>
-
-            <div className="vendor-mobile-shell__progress">
-              <div className="vendor-mobile-shell__progress-head">
-                <div>
-                  <span>Next Step</span>
-                  <strong>{nextAction.label}</strong>
-                </div>
-                <strong>{setupProgress}%</strong>
-              </div>
-              <div className="vendor-progress-bar">
-                <span style={{ width: `${setupProgress}%` }} />
-              </div>
-            </div>
-
             <div className="vendor-mobile-shell__stats vendor-mobile-shell__stats--summary">
               {summaryCards.map((card) => {
                 const Icon = card.icon;
@@ -1307,12 +1834,20 @@ export default function VendorApp() {
             </div>
           </section>
 
-          <div className="page-header vendor-page-header">
+          <div
+            className={`page-header vendor-page-header ${
+              activeView === 'store' ? 'vendor-page-header--store' : ''
+            } ${activeView === 'overview' ? 'vendor-page-header--overview' : ''}`}
+          >
             <div>
               <h1>{pageTitle}</h1>
               <p>{pageDescription}</p>
             </div>
-            <div className="vendor-page-actions">
+            <div
+              className={`vendor-page-actions ${
+                activeView === 'store' ? 'vendor-page-actions--store' : ''
+              } ${activeView === 'overview' ? 'vendor-page-actions--overview' : ''}`}
+            >
               <button
                 type="button"
                 className="btn-primary"
@@ -1333,12 +1868,16 @@ export default function VendorApp() {
           </div>
 
           {(loading || notice) && (
-            <div className="vendor-alert">
+            <div
+              className={`vendor-alert ${activeView === 'store' ? 'vendor-alert--store' : ''} ${
+                activeView === 'overview' ? 'vendor-alert--overview' : ''
+              }`}
+            >
               {loading ? 'Loading your workspace from the backend...' : notice}
             </div>
           )}
 
-          <div className="vendor-summary-grid">
+          <div className={`vendor-summary-grid ${activeView === 'overview' ? 'vendor-summary-grid--overview' : ''}`}>
             {summaryCards.map((card) => {
               const Icon = card.icon;
 
@@ -1365,8 +1904,8 @@ export default function VendorApp() {
           </div>
 
             {activeView === 'overview' && (
-              <div className="vendor-dashboard-shell">
-                <div className="vendor-overview-grid">
+              <div className="vendor-dashboard-shell vendor-dashboard-shell--overview">
+                <div className="vendor-overview-grid vendor-overview-grid--overview">
                 <section className="vendor-panel-card vendor-overview-feature" style={cardStyle}>
                   <div className="vendor-section-head">
                     <div>
@@ -1517,11 +2056,11 @@ export default function VendorApp() {
                 <section className="vendor-panel-card" style={cardStyle}>
                   <div className="vendor-section-head vendor-section-head--stacked">
                     <div>
-                      <span className="vendor-section-kicker">Telegram Bookings</span>
-                      <h2>Income from customer bookings</h2>
+                      <span className="vendor-section-kicker">Customer Orders</span>
+                      <h2>Income from storefront orders</h2>
                       <p>
-                        Each time a customer books items and the Telegram draft opens, the booking
-                        total is recorded here for the vendor dashboard.
+                        Each time a customer books items from the storefront, the order total is
+                        recorded here for the vendor dashboard.
                       </p>
                     </div>
                   </div>
@@ -1553,7 +2092,9 @@ export default function VendorApp() {
                                 {formatDateTime(booking.createdAt) || 'Recent booking'}
                               </span>
                             </div>
-                            <span className="vendor-booking-card__badge">Telegram</span>
+                            <span className="vendor-booking-card__badge">
+                              {booking.channel === 'telegram' ? 'Telegram' : 'Storefront'}
+                            </span>
                           </div>
                           <p>
                             {booking.itemsPreview ||
@@ -1565,7 +2106,7 @@ export default function VendorApp() {
                   ) : (
                     <div className="vendor-empty-state">
                       <MessageCircle size={18} />
-                      <strong>No Telegram bookings yet</strong>
+                      <strong>No orders yet</strong>
                       <span>Income will appear here after a customer books products from the storefront.</span>
                     </div>
                   )}
@@ -1627,12 +2168,12 @@ export default function VendorApp() {
                   <div className="vendor-section-head">
                     <div>
                       <span className="vendor-section-kicker">Store Profile</span>
-                      <h2>Design a shop profile that feels polished and dependable</h2>
-                      <p>Update the branding, location, and contact details customers will see first so the storefront feels like a real business.</p>
+                      <h2>Set up the shop page customers will understand quickly</h2>
+                      <p>Add the name, location, contact, and short description customers need before they message or order.</p>
                     </div>
                     <div className="vendor-pill">
                       <Store size={14} />
-                      <span>{hasShop ? 'Store Live' : 'Draft Mode'}</span>
+                      <span>{hasShop ? 'Shop page ready' : 'Setup in progress'}</span>
                     </div>
                   </div>
 
@@ -1650,31 +2191,36 @@ export default function VendorApp() {
                         )}
                       </div>
                       <div className="vendor-profile-banner__copy">
-                        <strong>{shopForm.name || 'Your storefront'}</strong>
-                        <span>/{displayHandle}</span>
-                        <small>{account?.email || 'Vendor account owner'}</small>
+                        <strong>{shopForm.name || 'Your shop page'}</strong>
+                        <span>{storefrontSummary}</span>
+                        <small>{draftedShopLinkSummary}</small>
+                        <small>{subscriptionSummary}</small>
+                        <small>{approvalSummary}</small>
                       </div>
                     </div>
 
                     <div className="vendor-chip-row">
-                      <span className={`vendor-info-chip ${hasShop ? 'is-primary' : ''}`}>
-                        {hasShop ? 'Public storefront live' : 'Draft storefront'}
+                      <span className={`vendor-info-chip ${canPublishProducts ? 'is-primary' : ''}`}>
+                        {vendorApproval.label}
                       </span>
-                      <span className="vendor-info-chip">{profileHealthLabel}</span>
-                      <span className="vendor-info-chip">{previewLocation}</span>
+                      <span className={`vendor-info-chip ${hasShop ? 'is-primary' : ''}`}>
+                        {storePageStatusLabel}
+                      </span>
+                      <span className="vendor-info-chip">{storeDetailsReadyLabel}</span>
                     </div>
                   </div>
 
                   <div className="vendor-profile-sections">
                     <section className="vendor-profile-section-card">
                       <div className="vendor-profile-section-card__head">
-                        <span>Brand foundation</span>
-                        <strong>Name, public handle, and logo</strong>
+                        <span>Step 1</span>
+                        <strong>Choose the shop name, link, and picture</strong>
+                        <p>These are the first details customers notice when they open your shop page.</p>
                       </div>
 
                       <div className="vendor-form-grid vendor-form-grid--store">
                         <label className="vendor-field">
-                          <span>Shop name</span>
+                          <span>Shop name customers will see</span>
                           <input
                             style={inputStyle}
                             placeholder="Sister Store"
@@ -1686,7 +2232,7 @@ export default function VendorApp() {
                         </label>
 
                         <label className="vendor-field">
-                          <span>Public handle</span>
+                          <span>Short page link</span>
                           <input
                             style={inputStyle}
                             placeholder="your-handle"
@@ -1694,13 +2240,13 @@ export default function VendorApp() {
                             onChange={(event) => setShopHandleDraft(event.target.value)}
                           />
                           <small>
-                            Use letters, numbers, and dashes only. Changing this updates your
-                            public store link after you save.
+                            This becomes part of your shop link, like /sister-store. Use letters,
+                            numbers, and dashes only.
                           </small>
                         </label>
 
                         <label className="vendor-field vendor-field--full">
-                          <span>Store logo</span>
+                          <span>Shop photo or logo</span>
                           <div className="vendor-upload-field">
                             <input
                               ref={logoInputRef}
@@ -1718,20 +2264,21 @@ export default function VendorApp() {
                               <span>{logoFile ? logoFile.name : 'Choose shop logo'}</span>
                             </button>
                           </div>
-                          <small>Square logos work best for the profile block and storefront preview.</small>
+                          <small>Use any clear square image. A logo is great, but a simple shop photo also works.</small>
                         </label>
                       </div>
                     </section>
 
                     <section className="vendor-profile-section-card">
                       <div className="vendor-profile-section-card__head">
-                        <span>Contact and reach</span>
-                        <strong>Location and response channel</strong>
+                        <span>Step 2</span>
+                        <strong>Add the place and contact customers should use</strong>
+                        <p>Help customers understand where you are and how they should message you.</p>
                       </div>
 
                       <div className="vendor-form-grid vendor-form-grid--store">
                         <label className="vendor-field">
-                          <span>Shop location</span>
+                          <span>City, pickup place, or delivery area</span>
                           <div style={{ display: 'grid', gap: '10px' }}>
                             <input
                               style={inputStyle}
@@ -1759,18 +2306,18 @@ export default function VendorApp() {
                               <span>
                                 {detectingLocation
                                   ? 'Detecting current location...'
-                                  : 'Use Current Location'}
+                                  : 'Use my current location'}
                               </span>
                             </button>
                           </div>
                           <small>
-                            Use your current location from OpenStreetMap or type your city,
-                            pickup point, or delivery area manually.
+                            You can type this yourself if you prefer. Example: Battambang city,
+                            pickup at Psar Nat.
                           </small>
                         </label>
 
                         <label className="vendor-field">
-                          <span>Telegram username</span>
+                          <span>Telegram for customer messages</span>
                           <input
                             style={inputStyle}
                             placeholder="@yourtelegram"
@@ -1782,19 +2329,20 @@ export default function VendorApp() {
                               }))
                             }
                           />
-                          <small>This gives customers a direct line back to you.</small>
+                          <small>Customers will use this when they want to ask questions or confirm an order.</small>
                         </label>
                       </div>
                     </section>
 
                     <section className="vendor-profile-section-card vendor-profile-section-card--full">
                       <div className="vendor-profile-section-card__head">
-                        <span>About section</span>
-                        <strong>Describe what shoppers can expect from this store</strong>
+                        <span>Step 3</span>
+                        <strong>Write a short shop introduction</strong>
+                        <p>Use simple words to explain what you sell and what customers can expect.</p>
                       </div>
 
                       <label className="vendor-field">
-                        <span>About your shop</span>
+                        <span>Short message for customers</span>
                         <textarea
                           style={{ ...inputStyle, minHeight: '156px', resize: 'vertical' }}
                           placeholder="Tell shoppers what makes your store worth visiting."
@@ -1806,34 +2354,34 @@ export default function VendorApp() {
                             }))
                           }
                         />
-                        <small>Keep it concise and specific so the page feels focused right away.</small>
+                        <small>Example: Homemade snacks, beauty products, or local pickup gifts.</small>
                       </label>
                     </section>
                   </div>
 
                   <div className="vendor-profile-guide">
                     <div className="vendor-note-card">
-                      <span>About Profile</span>
-                      <strong>Explain what your shop is about</strong>
-                      <p>Write one short description that tells shoppers what you sell and what style or category they should expect.</p>
+                      <span>Step 1</span>
+                      <strong>Use a clear shop name</strong>
+                      <p>Pick a name customers can remember and match it with a simple picture or logo.</p>
                     </div>
                     <div className="vendor-note-card">
-                      <span>Location</span>
-                      <strong>Help nearby buyers understand your area</strong>
-                      <p>Add your city, district, pickup place, or delivery range so customers know if they can order from you easily.</p>
+                      <span>Step 2</span>
+                      <strong>Tell people where you are</strong>
+                      <p>Add your city, pickup place, or delivery area so nearby customers know if they can order.</p>
                     </div>
                     <div className="vendor-note-card">
-                      <span>Contact</span>
-                      <strong>Keep one active Telegram username</strong>
-                      <p>Customers will use this direct contact when they ask questions or confirm an order after selecting products.</p>
+                      <span>Step 3</span>
+                      <strong>Add one contact customers can message</strong>
+                      <p>Use one active Telegram username so customers always know where to reach you.</p>
                     </div>
                   </div>
 
                   <div className="vendor-form-actions">
                     <button style={buttonStyle} type="button" onClick={saveShop} disabled={savingShop}>
-                      {savingShop ? 'Saving...' : shopId ? 'Save Shop Changes' : 'Create My Shop'}
+                      {savingShop ? 'Saving...' : shopId ? 'Save shop details' : 'Create my shop page'}
                     </button>
-                    <span>Customers will visit /{displayHandle} once the profile is saved.</span>
+                    <span>Your customer link will be /{displayHandle}. You can change it later.</span>
                   </div>
                 </section>
 
@@ -1842,8 +2390,8 @@ export default function VendorApp() {
                   <div className="vendor-section-head vendor-section-head--stacked">
                     <div>
                       <span className="vendor-section-kicker">Live Preview</span>
-                      <h2>Preview the exact impression customers will get</h2>
-                      <p>Use this preview to check whether the brand, location, and contact details all feel aligned.</p>
+                      <h2>Preview the page customers will see</h2>
+                      <p>Check whether the name, location, contact, and description feel clear before saving.</p>
                     </div>
                   </div>
 
@@ -1947,32 +2495,72 @@ export default function VendorApp() {
             {activeView === 'catalog' && (
               <div className="vendor-stack">
                 <section className="vendor-panel-card" style={cardStyle}>
-                  <div className="vendor-section-head">
-                    <div>
-                      <span className="vendor-section-kicker">Product Hub Editor</span>
-                      <h2>{editingProductId ? 'Update this product' : 'Add a product to your hub'}</h2>
-                      <p>Keep the product details, stock, and image clear so the vendor hub stays easy to manage.</p>
+                  <div className="vendor-catalog-workspace">
+                    <div className="vendor-catalog-head-card">
+                      <div className="vendor-catalog-head-card__row">
+                        <div className="vendor-catalog-head-card__copy">
+                          <span>Catalog Workspace</span>
+                          <strong>{catalogWorkspaceTitle}</strong>
+                          <p>{catalogWorkspaceDescription}</p>
+                        </div>
+                        <div className="vendor-pill">
+                          <Package2 size={14} />
+                          <span>{products.length} live</span>
+                        </div>
+                      </div>
+
+                      <div className="vendor-catalog-focus-pills">
+                        {catalogFocusPills.map((item) => (
+                          <span key={item} className="vendor-catalog-focus-pill">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="vendor-pill">
-                      <Package2 size={14} />
-                      <span>{products.length} in catalog</span>
+
+                    <div className="vendor-catalog-status-card">
+                      <div className="vendor-catalog-status-card__head">
+                        <div className="vendor-catalog-status-card__copy">
+                          <span>Publishing access</span>
+                          <strong>{catalogStatusTitle}</strong>
+                          <p>{catalogStatusDescription}</p>
+                        </div>
+                        <span className={`vendor-status-pill ${catalogStatusTone}`}>
+                          {vendorApproval.label}
+                        </span>
+                      </div>
+
+                      <div className="vendor-catalog-status-groups">
+                        {catalogActionGroups.map((group) => (
+                          <div key={group.title} className="vendor-catalog-status-group">
+                            <span>{group.title}</span>
+                            <ul>
+                              {group.items.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+
+                      <p className="vendor-catalog-status-card__meta">{approvalSummary}</p>
                     </div>
                   </div>
 
-                  <div className="vendor-hub-stats">
-                    <div className="vendor-hub-stat">
-                      <span>Products live</span>
+                  <div className="vendor-hub-stats vendor-hub-stats--catalog">
+                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
+                      <span>Live products</span>
                       <strong>{products.length}</strong>
                     </div>
-                    <div className="vendor-hub-stat">
-                      <span>Total units in stock</span>
+                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
+                      <span>Units tracked</span>
                       <strong>{totalStock}</strong>
                     </div>
-                    <div className="vendor-hub-stat">
-                      <span>Low stock items</span>
+                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
+                      <span>Need restock</span>
                       <strong>{lowStockCount}</strong>
                     </div>
-                    <div className="vendor-hub-stat">
+                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
                       <span>Out of stock</span>
                       <strong>{outOfStockCount}</strong>
                     </div>
@@ -1980,128 +2568,249 @@ export default function VendorApp() {
 
                   <div className="vendor-catalog-editor">
                     <div className="vendor-catalog-editor__form">
-                      <div className="vendor-form-grid vendor-form-grid--catalog">
-                        <label className="vendor-field">
-                          <span>Product name</span>
-                          <input
-                            style={inputStyle}
-                            placeholder="Product Name"
-                            value={productForm.name}
-                            onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
-                          />
-                        </label>
+                      <div className="vendor-catalog-editor__intro">
+                        <span>Product details</span>
+                        <strong>
+                          {editingProductId
+                            ? 'Update this product in one clean form'
+                            : 'Create a storefront-ready product'}
+                        </strong>
+                        <p>
+                          Start with the essentials, add a clear photo, and finish with a short
+                          description customers can trust.
+                        </p>
+                      </div>
 
-                        <label className="vendor-field">
-                          <span>Price</span>
-                          <input
-                            style={inputStyle}
-                            placeholder="$25"
-                            value={productForm.price}
-                            onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))}
-                          />
-                        </label>
-
-                        <label className="vendor-field">
-                          <span>Discount banner</span>
-                          <input
-                            style={inputStyle}
-                            placeholder="20% OFF"
-                            value={productForm.discountBanner}
-                            onChange={(event) =>
-                              setProductForm((current) => ({
-                                ...current,
-                                discountBanner: event.target.value,
-                              }))
-                            }
-                          />
-                          <small>Optional. This short label will show on the product card for customers.</small>
-                        </label>
-
-                        <label className="vendor-field">
-                          <span>Available quantity</span>
-                          <input
-                            style={inputStyle}
-                            type="number"
-                            min="0"
-                            step="1"
-                            placeholder="0"
-                            value={productForm.stock}
-                            onChange={(event) =>
-                              setProductForm((current) => ({
-                                ...current,
-                                stock: event.target.value,
-                              }))
-                            }
-                          />
-                          <small>This is how many pieces customers can buy before it shows out of stock.</small>
-                        </label>
-
-                        <label className="vendor-field vendor-field--full">
-                          <span>Product image</span>
-                          <div className="vendor-upload-field">
-                            <input
-                              ref={productInputRef}
-                              className="vendor-hidden-input"
-                              type="file"
-                              accept="image/png,image/jpeg,image/webp,image/gif"
-                              onChange={(event) => setProductFile(event.target.files?.[0] || null)}
-                            />
-                            <button
-                              type="button"
-                              className="vendor-upload-button"
-                              onClick={() => productInputRef.current?.click()}
-                            >
-                              <ImagePlus size={16} />
-                              <span>{productFile ? productFile.name : 'Choose product image'}</span>
-                            </button>
+                      <div className="vendor-catalog-upload-card">
+                        <div className="vendor-catalog-upload-card__head">
+                          <div className="vendor-catalog-upload-card__copy">
+                            <span>Quick product setup</span>
+                            <strong>Everything needed for a strong product card</strong>
+                            <p>
+                              Keep the information simple, clear, and easy for customers to scan.
+                            </p>
                           </div>
+                          <div className="vendor-catalog-upload-card__tags">
+                            <span className="vendor-catalog-upload-tag">Name</span>
+                            <span className="vendor-catalog-upload-tag">Price</span>
+                            <span className="vendor-catalog-upload-tag">Photo</span>
+                            <span className="vendor-catalog-upload-tag is-muted">Description</span>
+                          </div>
+                        </div>
+
+                        <div className="vendor-catalog-primary-grid">
+                          <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                            <span>Name customers will see</span>
+                            <input
+                              style={inputStyle}
+                              placeholder="Organic mango jam"
+                              value={productForm.name}
+                              onChange={(event) =>
+                                setProductForm((current) => ({
+                                  ...current,
+                                  name: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+
+                          <label className="vendor-field vendor-field--catalog">
+                            <span>Price label</span>
+                            <input
+                              style={inputStyle}
+                              placeholder="$25"
+                              value={productForm.price}
+                              onChange={(event) =>
+                                setProductForm((current) => ({
+                                  ...current,
+                                  price: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+
+                          <label className="vendor-field vendor-field--catalog">
+                            <span>Stock available</span>
+                            <input
+                              style={inputStyle}
+                              type="number"
+                              min="0"
+                              step="1"
+                              placeholder="12"
+                              value={productForm.stock}
+                              onChange={(event) =>
+                                setProductForm((current) => ({
+                                  ...current,
+                                  stock: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+
+                          <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                            <span>Discount badge</span>
+                            <input
+                              style={inputStyle}
+                              placeholder="20% OFF"
+                              value={productForm.discountBanner}
+                              onChange={(event) =>
+                                setProductForm((current) => ({
+                                  ...current,
+                                  discountBanner: event.target.value,
+                                }))
+                              }
+                            />
+                            <small>Optional. Add this only when you want a short promotion label on the product card.</small>
+                          </label>
+                        </div>
+
+                        <div className="vendor-catalog-media-grid">
+                          <label className="vendor-field vendor-field--catalog">
+                            <span>Product photo</span>
+                            <div className="vendor-catalog-upload-panel">
+                              <div className="vendor-upload-field">
+                                <input
+                                  ref={productInputRef}
+                                  className="vendor-hidden-input"
+                                  type="file"
+                                  accept="image/png,image/jpeg,image/webp,image/gif"
+                                  onChange={(event) => setProductFile(event.target.files?.[0] || null)}
+                                />
+                                <button
+                                  type="button"
+                                  className="vendor-upload-button vendor-upload-button--catalog"
+                                  onClick={() => productInputRef.current?.click()}
+                                >
+                                  <ImagePlus size={16} />
+                                  <span>{productFile ? productFile.name : 'Choose product photo'}</span>
+                                </button>
+                              </div>
+                              <small>
+                                {productFile
+                                  ? 'New photo selected. Review the preview before publishing.'
+                                  : productImage
+                                    ? 'Current photo is ready. Replace it if you want a better storefront image.'
+                                    : 'Use a bright, clear photo so customers can understand the product quickly.'}
+                              </small>
+                            </div>
+                          </label>
+
+                          <div
+                            className={`vendor-catalog-inline-preview ${
+                              productImage ? 'has-image' : 'is-empty'
+                            }`}
+                          >
+                            {productImage ? (
+                              <img
+                                src={productImage}
+                                alt="Selected product"
+                                className="vendor-catalog-inline-preview__image"
+                              />
+                            ) : (
+                              <div className="vendor-catalog-inline-preview__empty">
+                                <Package2 size={22} />
+                                <strong>No photo yet</strong>
+                                <span>Upload one to complete the product card.</span>
+                              </div>
+                            )}
+                            <div className="vendor-catalog-inline-preview__meta">
+                              <strong>Storefront photo</strong>
+                              <span>{productImage ? 'Ready for preview' : 'Waiting for upload'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <label className="vendor-field vendor-field--catalog">
+                          <span>Short description</span>
+                          <textarea
+                            style={{ ...inputStyle, minHeight: '128px', resize: 'vertical' }}
+                            placeholder="Tell customers the size, flavor, material, or what makes this product special."
+                            value={productForm.desc}
+                            onChange={(event) =>
+                              setProductForm((current) => ({
+                                ...current,
+                                desc: event.target.value,
+                              }))
+                            }
+                          />
+                          <small>
+                            Keep it short and useful. Focus on the details a customer needs before
+                            ordering.
+                          </small>
                         </label>
                       </div>
 
-                      <label className="vendor-field">
-                        <span>Product description</span>
-                        <textarea
-                          style={{ ...inputStyle, minHeight: '128px', resize: 'vertical' }}
-                          placeholder="Explain the product in a short, customer-friendly way."
-                          value={productForm.desc}
-                          onChange={(event) => setProductForm((current) => ({ ...current, desc: event.target.value }))}
-                        />
-                      </label>
+                      <div className="vendor-catalog-submit-bar">
+                        <div className="vendor-catalog-submit-bar__copy">
+                          <span>Next action</span>
+                          <strong>{catalogSubmitTitle}</strong>
+                          <p>{catalogSubmitDescription}</p>
+                        </div>
 
-                      <div className="vendor-form-actions">
-                        <button
-                          style={buttonStyle}
-                          type="button"
-                          onClick={submitProduct}
-                          disabled={savingProduct || deletingProductId === editingProductId}
-                        >
-                          {savingProduct ? 'Saving...' : editingProductId ? 'Update Product' : 'Publish Product'}
-                        </button>
-                        {editingProductId && (
-                          <>
-                            <button
-                              style={secondaryButtonStyle}
-                              type="button"
-                              onClick={resetProductEditor}
-                              disabled={deletingProductId === editingProductId}
-                            >
-                              Cancel Edit
-                            </button>
-                            <button
-                              className="vendor-btn-danger"
-                              type="button"
-                              onClick={() => deleteProduct(editingProductId, productForm.name || 'this product')}
-                              disabled={deletingProductId === editingProductId}
-                            >
-                              <Trash2 size={15} />
-                              <span>{deletingProductId === editingProductId ? 'Deleting...' : 'Delete Product'}</span>
-                            </button>
-                          </>
-                        )}
+                        <div className="vendor-form-actions vendor-form-actions--catalog">
+                          <button
+                            style={buttonStyle}
+                            type="button"
+                            onClick={submitProduct}
+                            disabled={
+                              savingProduct ||
+                              deletingProductId === editingProductId ||
+                              !canPublishProducts
+                            }
+                          >
+                            {!canPublishProducts
+                              ? 'Waiting for Approval'
+                              : savingProduct
+                                ? 'Saving...'
+                                : editingProductId
+                                  ? 'Update Product'
+                                  : 'Publish Product'}
+                          </button>
+                          {editingProductId && (
+                            <>
+                              <button
+                                style={secondaryButtonStyle}
+                                type="button"
+                                onClick={resetProductEditor}
+                                disabled={
+                                  deletingProductId === editingProductId || !canPublishProducts
+                                }
+                              >
+                                Cancel Edit
+                              </button>
+                              <button
+                                className="vendor-btn-danger"
+                                type="button"
+                                onClick={() =>
+                                  deleteProduct(editingProductId, productForm.name || 'this product')
+                                }
+                                disabled={
+                                  deletingProductId === editingProductId || !canPublishProducts
+                                }
+                              >
+                                <Trash2 size={15} />
+                                <span>
+                                  {deletingProductId === editingProductId
+                                    ? 'Deleting...'
+                                    : 'Delete Product'}
+                                </span>
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     <div className="vendor-catalog-editor__preview">
+                      <div className="vendor-catalog-editor__intro vendor-catalog-editor__intro--preview">
+                        <span>Live preview</span>
+                        <strong>Check the customer-facing product card</strong>
+                        <p>
+                          This shows how the product can look in the storefront before you publish
+                          it.
+                        </p>
+                      </div>
+
                       <div className={`vendor-product-preview vendor-product-preview--stage ${productImage ? '' : 'is-empty'}`}>
                         {productImage ? (
                           <>
@@ -2120,7 +2829,7 @@ export default function VendorApp() {
                           <div className="vendor-product-preview__empty">
                             <Package2 size={28} />
                             <strong>Product preview</strong>
-                            <span>Upload an image to see how the card will look in the catalog.</span>
+                            <span>Add a photo to preview how the card can look in the storefront.</span>
                           </div>
                         )}
                       </div>
@@ -2135,7 +2844,7 @@ export default function VendorApp() {
                             ? `Price shown to customers: ${productForm.price}`
                             : 'Add a price so customers can understand the offer quickly.'}
                         </p>
-                        <p>{`Available quantity: ${productForm.stock === '' ? 0 : productForm.stock}`}</p>
+                        <p>{`Stock available: ${productForm.stock === '' ? 0 : productForm.stock}`}</p>
                       </div>
                     </div>
                   </div>
@@ -2216,7 +2925,7 @@ export default function VendorApp() {
                                       className="vendor-btn-secondary"
                                       type="button"
                                       onClick={() => startEdit(product)}
-                                      disabled={deletingProductId === product.id}
+                                      disabled={deletingProductId === product.id || !canPublishProducts}
                                     >
                                       Edit
                                     </button>
@@ -2224,7 +2933,7 @@ export default function VendorApp() {
                                       className="vendor-btn-danger"
                                       type="button"
                                       onClick={() => deleteProduct(product.id, product.name)}
-                                      disabled={deletingProductId === product.id}
+                                      disabled={deletingProductId === product.id || !canPublishProducts}
                                     >
                                       <Trash2 size={15} />
                                       <span>{deletingProductId === product.id ? 'Deleting...' : 'Delete'}</span>
@@ -2245,38 +2954,47 @@ export default function VendorApp() {
             {activeView === 'share' && (
               <div className="vendor-share-grid">
                 <section className="vendor-panel-card" style={cardStyle}>
-                  <div className="vendor-section-head">
+                  <div className="vendor-section-head vendor-section-head--compact">
                     <div>
-                      <span className="vendor-section-kicker">Share Control</span>
-                      <h2>Send customers to one clean storefront link</h2>
-                      <p>Use this area when you are ready to copy, test, and send the public page to customers.</p>
+                      <span className="vendor-section-kicker">Store Link</span>
+                      <h2>Share your link</h2>
+                      <p>Copy or open it before sending it to customers.</p>
                     </div>
                     <div className="vendor-pill">
                       <Globe size={14} />
-                      <span>{hasShop ? 'Share Ready' : 'Locked'}</span>
+                      <span>{hasShop ? 'Ready' : 'Locked'}</span>
                     </div>
                   </div>
 
                   <div className="vendor-share-link-box">
+                    <div className="vendor-share-link-box__copy">
+                      <span>Public link</span>
+                      <small>{hasShop ? 'Customers open this page.' : 'Save your store to unlock this link.'}</small>
+                    </div>
                     <input style={inputStyle} readOnly value={shopLink || 'Create your shop first'} />
                     <div className="vendor-form-actions">
                       <button style={secondaryButtonStyle} type="button" onClick={copyShopLink}>
                         <Copy size={16} />
-                        <span>Copy Link</span>
+                        <span>Copy</span>
                       </button>
                       <button style={secondaryButtonStyle} type="button" onClick={openShopPreview}>
                         <ExternalLink size={16} />
-                        <span>Preview Storefront</span>
+                        <span>Open</span>
                       </button>
                     </div>
                   </div>
 
-                  <div className="vendor-share-steps">
+                  <div className="vendor-share-steps vendor-share-steps--compact">
                     {setupChecklist.map((item, index) => (
-                      <div key={item.label} className={`vendor-step-card ${item.done ? 'is-done' : ''}`}>
+                      <div
+                        key={item.label}
+                        className={`vendor-step-card vendor-step-card--compact ${item.done ? 'is-done' : ''}`}
+                      >
                         <span>{index + 1}</span>
-                        <strong>{item.label}</strong>
-                        <p>{item.hint}</p>
+                        <div className="vendor-step-card__copy">
+                          <strong>{item.label}</strong>
+                          <p>{item.hint}</p>
+                        </div>
                       </div>
                     ))}
                   </div>

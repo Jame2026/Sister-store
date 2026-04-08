@@ -4,10 +4,27 @@ CREATE DATABASE IF NOT EXISTS mini_online_store
 
 USE mini_online_store;
 
+CREATE TABLE IF NOT EXISTS admins (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  password_reset_code_hash VARCHAR(64),
+  password_reset_expires_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS vendors (
   id INT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  password_reset_code_hash VARCHAR(64),
+  password_reset_expires_at DATETIME NULL,
+  approval_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  approved_at DATETIME NULL,
+  subscription_plan VARCHAR(16) NOT NULL DEFAULT 'monthly',
+  subscription_started_at DATETIME NULL,
+  subscription_ends_at DATETIME NULL,
   shop_id VARCHAR(50) UNIQUE,
   shop_name VARCHAR(120),
   description TEXT,
@@ -41,7 +58,7 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE TABLE IF NOT EXISTS bookings (
   id INT AUTO_INCREMENT PRIMARY KEY,
   vendor_id INT NOT NULL,
-  channel VARCHAR(24) NOT NULL DEFAULT 'telegram',
+  channel VARCHAR(24) NOT NULL DEFAULT 'storefront',
   item_count INT NOT NULL DEFAULT 0,
   total_quantity INT NOT NULL DEFAULT 0,
   total_amount DECIMAL(12, 2) NULL,

@@ -386,6 +386,7 @@ function ShopInterface() {
   const [error, setError] = useState('');
   const [activePreviewProduct, setActivePreviewProduct] = useState(null);
   const [selectedProducts, setSelectedProducts] = useState({});
+  const [preferredPreviewProductId, setPreferredPreviewProductId] = useState('');
   const [purchaseBusy, setPurchaseBusy] = useState(false);
   const [purchaseNotice, setPurchaseNotice] = useState('');
   const [purchaseNoticeType, setPurchaseNoticeType] = useState('');
@@ -561,9 +562,21 @@ function ShopInterface() {
 
   useEffect(() => {
     setSelectedProducts({});
+    setPreferredPreviewProductId('');
     setPurchaseNotice('');
     setPurchaseNoticeType('');
   }, [vendorId]);
+
+  useEffect(() => {
+    setPreferredPreviewProductId((current) => {
+      const nextAvailableId =
+        selectedItems.find((item) => String(item.id) === String(current) && item.imageUrl)?.id ||
+        selectedItems.find((item) => item.imageUrl)?.id ||
+        '';
+
+      return String(nextAvailableId || '');
+    });
+  }, [selectedItems]);
 
   useEffect(() => {
     setSelectedProducts((current) => {
@@ -629,10 +642,15 @@ function ShopInterface() {
       typeof options === 'string'
         ? options
         : options.productName || directProduct?.name || '';
+    const selectedPreviewImageLink =
+      normalizedItems.find((item) => String(item.id) === String(preferredPreviewProductId))
+        ?.imageLink ||
+      normalizedItems.find((item) => item.imageLink)?.imageLink ||
+      '';
     const selectionTotalText = buildSelectionTotalText(normalizedItems);
     const inquiry =
       !productName && normalizedItems.length > 0
-        ? `Hello ${shopData.name}, ${
+        ? `${selectedPreviewImageLink ? `${selectedPreviewImageLink}\n\n` : ''}Hello ${shopData.name}, ${
             purchaseConfirmed
               ? 'I just placed this order from your Webstore:'
               : 'I would like to ask about these products:'
@@ -644,23 +662,23 @@ function ShopInterface() {
                 lines.push(`Unit price: ${item.price}`);
               }
 
-              if (item.lineTotalText) {
-                lines.push(`Line total: ${item.lineTotalText}`);
-              }
+               if (item.lineTotalText) {
+                 lines.push(`Line total: ${item.lineTotalText}`);
+               }
 
-              if (item.imageLink) {
-                lines.push(`Image link: ${item.imageLink}`);
-              }
+               if (item.imageLink && item.imageLink !== selectedPreviewImageLink) {
+                 lines.push(`Image link: ${item.imageLink}`);
+               }
 
-              return lines.join('\n');
-            })
-            .join('\n\n')}\n${
-            selectionTotalText ? `\nEstimated total: ${selectionTotalText}\n` : '\n'
-          }${
-            purchaseConfirmed
-              ? 'Please confirm the order details.'
-              : 'Can you confirm availability?'
-          }`
+               return lines.join('\n');
+             })
+             .join('\n\n')}\n${
+             selectionTotalText ? `\nEstimated total: ${selectionTotalText}\n` : '\n'
+           }${
+             purchaseConfirmed
+               ? 'Please confirm the order details.'
+               : 'Can you confirm availability?'
+           }`
         : productName
           ? `Hi ${shopData.name}, I found your shop and I am interested in "${productName}".${
               normalizedItems[0]?.price ? `\nUnit price: ${normalizedItems[0].price}` : ''
@@ -781,9 +799,14 @@ function ShopInterface() {
 
       setShopData(payload.shop);
       setSelectedProducts({});
-      setPurchaseNotice('Purchase recorded. Telegram is opening so you can confirm with the vendor.');
+      setPurchaseNotice(
+        'Purchase recorded. Telegram is opening so you can confirm with the vendor.'
+      );
       setPurchaseNoticeType('success');
-      openTelegram({ selectedItems: purchasedSnapshot, purchaseConfirmed: true });
+      openTelegram({
+        selectedItems: purchasedSnapshot,
+        purchaseConfirmed: true,
+      });
     } catch (purchaseError) {
       setPurchaseNotice(purchaseError.message);
       setPurchaseNoticeType('error');
@@ -1034,6 +1057,20 @@ function ShopInterface() {
               <div className="inquiry-list">
                 {selectedItems.map((item) => (
                   <article className="inquiry-item" key={item.id}>
+                    {item.imageUrl ? (
+                      <button
+                        type="button"
+                        className="inquiry-item__media"
+                        onClick={() => openProductPreview(item)}
+                        aria-label={`View image for ${item.name}`}
+                      >
+                        <img src={item.imageUrl} alt={item.name} className="inquiry-item__image" />
+                      </button>
+                    ) : (
+                      <div className="inquiry-item__media inquiry-item__media--fallback" aria-hidden="true">
+                        <Package size={20} />
+                      </div>
+                    )}
                     <div className="inquiry-item__copy">
                       <strong>{item.name}</strong>
                       <p>{item.price ? `${item.price} each` : 'Ask vendor for price details'}</p>
@@ -1044,6 +1081,19 @@ function ShopInterface() {
                         <span className="inquiry-item__line-total">
                           {item.quantity} x {item.price} = {item.lineTotalText}
                         </span>
+                      )}
+                      {item.imageUrl && (
+                        <button
+                          type="button"
+                          className={`inquiry-preview-button ${
+                            String(preferredPreviewProductId) === String(item.id) ? 'is-active' : ''
+                          }`}
+                          onClick={() => setPreferredPreviewProductId(String(item.id))}
+                        >
+                          {String(preferredPreviewProductId) === String(item.id)
+                            ? 'Telegram preview image'
+                            : 'Use as Telegram preview'}
+                        </button>
                       )}
                     </div>
                     <div className="inquiry-item__side">
@@ -1085,7 +1135,9 @@ function ShopInterface() {
                 </div>
                 <p>
                   Buying from this section reduces stock immediately, then the Telegram draft opens
-                  with names, quantities, totals, and image links.
+                  with names, quantities, totals, and image links. Telegram may preview only one
+                  image card even when multiple product image links are included, so the selected
+                  Telegram preview item is placed first.
                 </p>
               </div>
             </>

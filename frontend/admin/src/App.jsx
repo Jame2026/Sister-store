@@ -1,22 +1,62 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   BarChart,
-  Users,
-  Package,
-  Settings,
-  Search,
   Bell,
   Eye,
-  AlertTriangle,
-  XCircle,
+  EyeOff,
+  Package,
+  Search,
+  Settings,
   Trash2,
+  Users,
+  XCircle,
 } from 'lucide-react';
+
+const ADMIN_TOKEN_STORAGE_KEY = 'admin_auth_token';
+const EMPTY_AUTH_FORM = {
+  email: '',
+  password: '',
+  confirmPassword: '',
+  resetCode: '',
+};
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '')
+).replace(/\/$/, '');
 
 const STAT_ICONS = {
   'Total Vendors': Users,
   'Active Products': Package,
   'Pending Approval': AlertTriangle,
   'Suspended Accounts': XCircle,
+};
+
+const authInputStyle = {
+  width: '100%',
+  borderRadius: '14px',
+  border: '1px solid #334155',
+  background: '#0f172a',
+  color: '#f8fafc',
+  padding: '14px 16px',
+  fontSize: '15px',
+};
+
+const passwordFieldShellStyle = {
+  position: 'relative',
+};
+
+const passwordToggleButtonStyle = {
+  position: 'absolute',
+  top: '50%',
+  right: '12px',
+  transform: 'translateY(-50%)',
+  background: 'transparent',
+  border: 'none',
+  color: '#94a3b8',
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+  padding: '4px',
 };
 
 async function readApiResponse(response) {
@@ -27,6 +67,30 @@ async function readApiResponse(response) {
   }
 
   return payload;
+}
+
+function apiUrl(path) {
+  return `${API_BASE_URL}${path}`;
+}
+
+function getStoredAdminToken() {
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setStoredAdminToken(token) {
+  try {
+    if (token) {
+      localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    } else {
+      localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
 }
 
 function formatDateTime(value) {
@@ -46,10 +110,58 @@ function formatDateTime(value) {
 }
 
 function formatStatValue(value) {
-  return (Number(String(value || '0').replace(/,/g, '')) || 0);
+  return Number(String(value || '0').replace(/,/g, '')) || 0;
+}
+
+function makeInitials(value) {
+  const source = String(value || '').trim();
+
+  if (!source) {
+    return 'AD';
+  }
+
+  const [first = '', second = ''] = source.split(/\s+/);
+  const next = `${first[0] || ''}${second[0] || ''}`.toUpperCase();
+
+  return next || source.slice(0, 2).toUpperCase();
+}
+
+function isAdminAuthError(message) {
+  return /admin token|admin account|sign in as admin/i.test(String(message || ''));
+}
+
+function formatAdminErrorMessage(message) {
+  const normalized = String(message || '').trim();
+
+  if (!normalized) {
+    return 'Unable to continue.';
+  }
+
+  if (/database initialization failed: connect ECONNREFUSED/i.test(normalized)) {
+    return 'The backend cannot reach MySQL yet. Start MySQL or Laragon, then refresh this page or try signing in again.';
+  }
+
+  if (/database initialization failed: access denied/i.test(normalized)) {
+    return 'MySQL rejected the database username or password. Check the DB settings in backend/.env.';
+  }
+
+  return normalized;
 }
 
 export default function App() {
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState('login');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authForm, setAuthForm] = useState(EMPTY_AUTH_FORM);
+  const [resetDetails, setResetDetails] = useState(null);
+  const [passwordVisibility, setPasswordVisibility] = useState({
+    password: false,
+    confirmPassword: false,
+  });
+  const [adminToken, setAdminToken] = useState('');
+  const [adminAccount, setAdminAccount] = useState(null);
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -57,43 +169,181 @@ export default function App() {
   const [selectedVendorId, setSelectedVendorId] = useState(0);
   const [deletingProductId, setDeletingProductId] = useState(0);
   const [deletingVendorId, setDeletingVendorId] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [approvingVendorId, setApprovingVendorId] = useState(0);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  async function loadAuthStatus() {
+    const payload = await readApiResponse(await fetch(apiUrl('/api/admin/auth/status')));
+    setAuthMode(payload.initialized ? 'login' : 'bootstrap');
+    setResetDetails(null);
+  }
+
+  function resetAdminWorkspace() {
+    setActiveTab('dashboard');
+    setStats([]);
+    setVendors([]);
+    setProducts([]);
+    setSelectedVendorId(0);
+    setDeletingProductId(0);
+    setDeletingVendorId(0);
+    setApprovingVendorId(0);
+    setLoading(false);
+    setError('');
+    setNotice('');
+  }
+
+  async function showAuthScreen(message = '') {
+    setStoredAdminToken('');
+    setAdminToken('');
+    setAdminAccount(null);
+    resetAdminWorkspace();
+    setResetDetails(null);
+    setPasswordVisibility({
+      password: false,
+      confirmPassword: false,
+    });
+    setAuthForm(EMPTY_AUTH_FORM);
+
+    try {
+      await loadAuthStatus();
+      setAuthError(formatAdminErrorMessage(message));
+    } catch (statusError) {
+      setAuthError(
+        formatAdminErrorMessage(
+          statusError.message || message || 'Unable to load admin access state.'
+        )
+      );
+    } finally {
+      setAuthReady(true);
+    }
+  }
+
+  function switchAuthMode(nextMode) {
+    setAuthMode(nextMode);
+    setAuthError('');
+    setResetDetails(null);
+    setPasswordVisibility({
+      password: false,
+      confirmPassword: false,
+    });
+    setAuthForm((current) => ({
+      ...EMPTY_AUTH_FORM,
+      email: current.email,
+    }));
+  }
+
+  function togglePasswordVisibility(field) {
+    setPasswordVisibility((current) => ({
+      ...current,
+      [field]: !current[field],
+    }));
+  }
+
+  function renderPasswordField(field, label, placeholder) {
+    const isVisible = passwordVisibility[field];
+
+    return (
+      <label style={{ display: 'grid', gap: '8px' }}>
+        <span style={{ fontWeight: 600, color: '#cbd5e1' }}>{label}</span>
+        <div style={passwordFieldShellStyle}>
+          <input
+            type={isVisible ? 'text' : 'password'}
+            value={authForm[field]}
+            onChange={(event) =>
+              setAuthForm((current) => ({ ...current, [field]: event.target.value }))
+            }
+            placeholder={placeholder}
+            style={{
+              ...authInputStyle,
+              paddingRight: '52px',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => togglePasswordVisibility(field)}
+            aria-label={isVisible ? `Hide ${label}` : `Show ${label}`}
+            style={passwordToggleButtonStyle}
+          >
+            {isVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
+        </div>
+      </label>
+    );
+  }
+
+  async function authedFetch(url, options = {}, overrideToken = '') {
+    const activeToken = overrideToken || adminToken;
+
+    if (!activeToken) {
+      throw new Error('Please sign in as admin first.');
+    }
+
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${activeToken}`);
+
+    return fetch(apiUrl(url), { ...options, headers });
+  }
+
+  async function loadAdminData(activeToken = '') {
+    setLoading(true);
+
+    try {
+      const [overviewPayload, productsPayload] = await Promise.all([
+        readApiResponse(await authedFetch('/api/admin/overview', {}, activeToken)),
+        readApiResponse(await authedFetch('/api/admin/products', {}, activeToken)),
+      ]);
+
+      setStats(overviewPayload.stats || []);
+      setVendors(overviewPayload.vendors || []);
+      setProducts(productsPayload.products || []);
+      setError('');
+    } catch (nextError) {
+      if (isAdminAuthError(nextError.message)) {
+        await showAuthScreen('Your admin session expired. Please sign in again.');
+        return;
+      }
+
+      setError(nextError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadOverview() {
-      setLoading(true);
+    async function restoreSession() {
+      const storedToken = getStoredAdminToken();
 
-      try {
-        const [overviewPayload, productsPayload] = await Promise.all([
-          readApiResponse(await fetch('/api/admin/overview')),
-          readApiResponse(await fetch('/api/admin/products')),
-        ]);
+      if (storedToken) {
+        try {
+          const sessionPayload = await readApiResponse(
+            await authedFetch('/api/admin/me', {}, storedToken)
+          );
 
-        if (cancelled) {
+          if (cancelled) {
+            return;
+          }
+
+          setAdminToken(storedToken);
+          setAdminAccount(sessionPayload.account || null);
+          setAuthError('');
+          setAuthReady(true);
+          await loadAdminData(storedToken);
           return;
+        } catch {
+          setStoredAdminToken('');
         }
+      }
 
-        setStats(overviewPayload.stats || []);
-        setVendors(overviewPayload.vendors || []);
-        setProducts(productsPayload.products || []);
-        setError('');
-        setNotice('');
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(nextError.message);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      if (!cancelled) {
+        await showAuthScreen('');
       }
     }
 
-    loadOverview();
+    restoreSession();
 
     return () => {
       cancelled = true;
@@ -105,6 +355,7 @@ export default function App() {
   const visibleProducts = selectedVendor
     ? products.filter((product) => Number(product.vendorId) === Number(selectedVendor.id))
     : products;
+  const adminInitials = makeInitials(adminAccount?.email || 'Admin');
 
   const pageTitle =
     activeTab === 'vendors'
@@ -117,7 +368,7 @@ export default function App() {
 
   const pageDescription =
     activeTab === 'vendors'
-      ? 'Review vendor accounts and remove vendors when needed. Editing is disabled for admin.'
+      ? 'Review vendor accounts, approve new vendors, and remove vendors when needed.'
       : activeTab === 'products'
         ? selectedVendor
           ? `Review and remove products published by ${selectedVendor.name}. Editing is disabled for admin.`
@@ -152,6 +403,116 @@ export default function App() {
     setNotice('');
   }
 
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError('');
+    setNotice('');
+    setError('');
+
+    try {
+      if (authMode === 'forgot') {
+        if (!resetDetails) {
+          const payload = await readApiResponse(
+            await fetch(apiUrl('/api/admin/auth/forgot-password'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                email: authForm.email,
+              }),
+            })
+          );
+
+          setResetDetails({
+            delivery: payload.delivery || 'manual',
+            resetCode: payload.resetCode,
+            expiresAt: payload.expiresAt,
+          });
+          setAuthForm((current) => ({
+            ...current,
+            password: '',
+            confirmPassword: '',
+            resetCode: '',
+          }));
+          setNotice(payload.message);
+          return;
+        }
+
+        if (authForm.password !== authForm.confirmPassword) {
+          throw new Error('Passwords do not match.');
+        }
+
+        const payload = await readApiResponse(
+          await fetch(apiUrl('/api/admin/auth/reset-password'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: authForm.email,
+              resetCode: authForm.resetCode,
+              password: authForm.password,
+            }),
+          })
+        );
+
+        setResetDetails(null);
+        setAuthMode('login');
+        setAuthForm({
+          ...EMPTY_AUTH_FORM,
+          email: authForm.email,
+        });
+        setNotice(payload.message);
+        return;
+      }
+
+      if (authMode === 'bootstrap' && authForm.password !== authForm.confirmPassword) {
+        throw new Error('Passwords do not match.');
+      }
+
+      const endpoint =
+        authMode === 'bootstrap' ? '/api/admin/auth/bootstrap' : '/api/admin/auth/login';
+      const payload = await readApiResponse(
+        await fetch(apiUrl(endpoint), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: authForm.email,
+            password: authForm.password,
+          }),
+        })
+      );
+
+      setStoredAdminToken(payload.token);
+      setAdminToken(payload.token);
+      setAdminAccount(payload.account || null);
+      setAuthForm(EMPTY_AUTH_FORM);
+      setNotice(
+        authMode === 'bootstrap'
+          ? 'First admin account created successfully.'
+          : 'Signed in as admin.'
+      );
+      await loadAdminData(payload.token);
+    } catch (nextError) {
+      setAuthError(formatAdminErrorMessage(nextError.message || 'Unable to continue.'));
+
+      if (/already exists/i.test(nextError.message || '')) {
+        await loadAuthStatus();
+      }
+    } finally {
+      setAuthBusy(false);
+      setAuthReady(true);
+    }
+  }
+
+  async function handleLogout() {
+    await showAuthScreen('Signed out successfully.');
+  }
+
   async function deleteProduct(product) {
     const shouldDelete = window.confirm(
       `Delete "${product.name}" from ${product.vendorName}? This cannot be undone.`
@@ -167,7 +528,7 @@ export default function App() {
 
     try {
       const payload = await readApiResponse(
-        await fetch(`/api/admin/products/${product.id}`, {
+        await authedFetch(`/api/admin/products/${product.id}`, {
           method: 'DELETE',
         })
       );
@@ -186,7 +547,11 @@ export default function App() {
       adjustStat('Active Products', -1);
       setNotice(payload.message);
     } catch (nextError) {
-      setError(nextError.message);
+      if (isAdminAuthError(nextError.message)) {
+        await showAuthScreen('Your admin session expired. Please sign in again.');
+      } else {
+        setError(nextError.message);
+      }
     } finally {
       setDeletingProductId(0);
     }
@@ -209,7 +574,7 @@ export default function App() {
 
     try {
       const payload = await readApiResponse(
-        await fetch(`/api/admin/vendors/${vendor.id}`, {
+        await authedFetch(`/api/admin/vendors/${vendor.id}`, {
           method: 'DELETE',
         })
       );
@@ -228,16 +593,325 @@ export default function App() {
       adjustStat('Total Vendors', -1);
       adjustStat('Active Products', -Number(payload.deletedProductCount || 0));
 
-      if (payload.vendorStatus === 'Pending') {
+      if (payload.vendorStatus === 'Pending Approval') {
         adjustStat('Pending Approval', -1);
       }
 
       setNotice(payload.message);
     } catch (nextError) {
-      setError(nextError.message);
+      if (isAdminAuthError(nextError.message)) {
+        await showAuthScreen('Your admin session expired. Please sign in again.');
+      } else {
+        setError(nextError.message);
+      }
     } finally {
       setDeletingVendorId(0);
     }
+  }
+
+  async function approveVendor(vendor) {
+    if (!vendor?.id) {
+      return;
+    }
+
+    setApprovingVendorId(vendor.id);
+    setError('');
+    setNotice('');
+
+    try {
+      const payload = await readApiResponse(
+        await authedFetch(`/api/admin/vendors/${vendor.id}/approve`, {
+          method: 'POST',
+        })
+      );
+
+      setVendors((current) =>
+        current.map((currentVendor) =>
+          currentVendor.id === vendor.id
+            ? {
+                ...currentVendor,
+                status: payload.vendor?.status || 'Approved',
+                statusKey: payload.vendor?.statusKey || 'approved',
+                approval: payload.vendor?.approval || currentVendor.approval,
+              }
+            : currentVendor
+        )
+      );
+
+      if (vendor.statusKey === 'pending') {
+        adjustStat('Pending Approval', -1);
+      }
+
+      setNotice(payload.message);
+    } catch (nextError) {
+      if (isAdminAuthError(nextError.message)) {
+        await showAuthScreen('Your admin session expired. Please sign in again.');
+      } else {
+        setError(nextError.message);
+      }
+    } finally {
+      setApprovingVendorId(0);
+    }
+  }
+
+  if (!authReady) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background: '#0f172a',
+          color: '#e2e8f0',
+          padding: '24px',
+        }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <strong style={{ display: 'block', fontSize: '1.1rem', marginBottom: '8px' }}>
+            Checking admin access
+          </strong>
+          <span style={{ color: '#94a3b8' }}>
+            Preparing the database-backed admin session.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!adminToken) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background:
+            'radial-gradient(circle at top, rgba(59,130,246,0.18), transparent 30%), #0f172a',
+          padding: '24px',
+          color: '#e2e8f0',
+        }}
+      >
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '460px',
+            background: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid rgba(148, 163, 184, 0.2)',
+            borderRadius: '24px',
+            padding: '32px',
+            boxShadow: '0 24px 60px rgba(15, 23, 42, 0.35)',
+          }}
+        >
+          <div style={{ display: 'grid', gap: '10px', marginBottom: '24px' }}>
+            <div
+              style={{
+                width: '52px',
+                height: '52px',
+                borderRadius: '16px',
+                display: 'grid',
+                placeItems: 'center',
+                background: 'rgba(59, 130, 246, 0.18)',
+                color: '#93c5fd',
+              }}
+            >
+              <BarChart size={24} />
+            </div>
+            <div>
+              <strong style={{ display: 'block', fontSize: '1.8rem', color: '#f8fafc' }}>
+                {authMode === 'bootstrap'
+                  ? 'Create the first admin'
+                  : authMode === 'forgot'
+                    ? 'Reset admin password'
+                    : 'Admin login'}
+              </strong>
+              <p style={{ marginTop: '8px', color: '#94a3b8', lineHeight: 1.6 }}>
+                {authMode === 'bootstrap'
+                  ? 'This account will be stored in MySQL and will control future admin access.'
+                  : authMode === 'forgot'
+                    ? 'Request a reset code with the admin email, then choose a new password.'
+                    : 'Only admins saved in the database can open the admin dashboard.'}
+              </p>
+            </div>
+          </div>
+
+          {authError && (
+            <div
+              style={{
+                marginBottom: '18px',
+                padding: '14px 16px',
+                borderRadius: '14px',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                color: '#fca5a5',
+                border: '1px solid rgba(239, 68, 68, 0.28)',
+              }}
+            >
+              {authError}
+            </div>
+          )}
+
+          {notice && (
+            <div
+              style={{
+                marginBottom: '18px',
+                padding: '14px 16px',
+                borderRadius: '14px',
+                backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                color: '#bfdbfe',
+                border: '1px solid rgba(96, 165, 250, 0.28)',
+              }}
+            >
+              {notice}
+            </div>
+          )}
+
+          <form onSubmit={handleAuthSubmit} style={{ display: 'grid', gap: '16px' }}>
+            <label style={{ display: 'grid', gap: '8px' }}>
+              <span style={{ fontWeight: 600, color: '#cbd5e1' }}>Admin email</span>
+              <input
+                type="email"
+                value={authForm.email}
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+                  if (authMode === 'forgot' && resetDetails) {
+                    setResetDetails(null);
+                  }
+                  setAuthForm((current) => ({ ...current, email: nextEmail }));
+                }}
+                placeholder="admin@example.com"
+                style={authInputStyle}
+              />
+            </label>
+
+            {(authMode !== 'forgot' || resetDetails) && (
+              renderPasswordField(
+                'password',
+                authMode === 'forgot' ? 'New password' : 'Password',
+                'At least 6 characters'
+              )
+            )}
+
+            {authMode === 'forgot' && resetDetails && (
+              <label style={{ display: 'grid', gap: '8px' }}>
+                <span style={{ fontWeight: 600, color: '#cbd5e1' }}>Reset code</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={authForm.resetCode}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({ ...current, resetCode: event.target.value }))
+                  }
+                  placeholder="6-digit code"
+                  style={authInputStyle}
+                />
+              </label>
+            )}
+
+            {(authMode === 'bootstrap' || (authMode === 'forgot' && resetDetails)) && (
+              renderPasswordField('confirmPassword', 'Confirm password', 'Repeat the password')
+            )}
+
+            {authMode === 'forgot' && resetDetails && (
+              <div
+                style={{
+                  padding: '14px 16px',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                  color: '#dbeafe',
+                  border: '1px solid rgba(96, 165, 250, 0.28)',
+                  lineHeight: 1.5,
+                }}
+              >
+                {resetDetails.resetCode ? (
+                  <>
+                    <strong style={{ display: 'block', marginBottom: '4px' }}>
+                      Reset code: {resetDetails.resetCode}
+                    </strong>
+                    <span style={{ color: '#bfdbfe' }}>
+                      Email delivery is not configured yet, so the code is shown here for now. It
+                      expires at {new Date(resetDetails.expiresAt).toLocaleString()}.
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ color: '#bfdbfe' }}>
+                    A reset code was sent to your email. Enter that code below before{' '}
+                    {new Date(resetDetails.expiresAt).toLocaleString()}.
+                  </span>
+                )}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={authBusy}
+              style={{
+                marginTop: '6px',
+                border: 'none',
+                borderRadius: '14px',
+                background: '#2563eb',
+                color: '#ffffff',
+                padding: '14px 16px',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: authBusy ? 'wait' : 'pointer',
+                opacity: authBusy ? 0.75 : 1,
+              }}
+            >
+              {authBusy
+                ? authMode === 'bootstrap'
+                  ? 'Creating admin...'
+                  : authMode === 'forgot'
+                    ? resetDetails
+                      ? 'Resetting password...'
+                      : 'Generating code...'
+                    : 'Signing in...'
+                : authMode === 'bootstrap'
+                  ? 'Create Admin'
+                  : authMode === 'forgot'
+                    ? resetDetails
+                      ? 'Reset Password'
+                      : 'Get Reset Code'
+                    : 'Sign In'}
+            </button>
+
+            {authMode === 'login' && (
+              <button
+                type="button"
+                onClick={() => switchAuthMode('forgot')}
+                style={{
+                  justifySelf: 'start',
+                  background: 'none',
+                  border: 'none',
+                  color: '#93c5fd',
+                  padding: 0,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Forgot password?
+              </button>
+            )}
+
+            {authMode === 'forgot' && (
+              <button
+                type="button"
+                onClick={() => switchAuthMode('login')}
+                style={{
+                  justifySelf: 'start',
+                  background: 'none',
+                  border: 'none',
+                  color: '#93c5fd',
+                  padding: 0,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Back to sign in
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -309,11 +983,16 @@ export default function App() {
             <input type="text" placeholder="Search vendors or products..." readOnly />
           </div>
           <div className="topbar-actions">
-            <button className="icon-btn">
+            <button className="icon-btn" type="button">
               <Bell size={20} />
               <span className="badge"></span>
             </button>
-            <div className="avatar">AD</div>
+            <button className="btn-secondary" type="button" onClick={handleLogout}>
+              Sign Out
+            </button>
+            <div className="avatar" title={adminAccount?.email || 'Admin'}>
+              {adminInitials}
+            </div>
           </div>
         </header>
 
@@ -404,11 +1083,11 @@ export default function App() {
               </div>
               <div className="table-actions">
                 {activeTab === 'products' && selectedVendor && (
-                  <button className="btn-secondary" onClick={clearVendorFilter}>
+                  <button className="btn-secondary" type="button" onClick={clearVendorFilter}>
                     View All Products
                   </button>
                 )}
-                <button className="btn-primary" onClick={() => window.location.reload()}>
+                <button className="btn-primary" type="button" onClick={() => loadAdminData()}>
                   Refresh Data
                 </button>
               </div>
@@ -429,6 +1108,7 @@ export default function App() {
                   <tr>
                     <th>Vendor Store</th>
                     <th>Owner</th>
+                    <th>Plan</th>
                     <th>Status</th>
                     <th>Total Products</th>
                     <th>Joined Date</th>
@@ -440,7 +1120,7 @@ export default function App() {
                 {loading && (
                   <tr>
                     <td
-                      colSpan={activeTab === 'products' ? '7' : '6'}
+                      colSpan={activeTab === 'products' ? '7' : '7'}
                       style={{ padding: '24px', color: '#94a3b8' }}
                     >
                       Loading admin data from the backend...
@@ -460,7 +1140,7 @@ export default function App() {
 
                 {!loading && activeTab !== 'products' && vendors.length === 0 && (
                   <tr>
-                    <td colSpan="6" style={{ padding: '24px', color: '#94a3b8' }}>
+                    <td colSpan="7" style={{ padding: '24px', color: '#94a3b8' }}>
                       No vendor accounts have been created in MySQL yet.
                     </td>
                   </tr>
@@ -490,6 +1170,7 @@ export default function App() {
                         <div className="row-actions">
                           <button
                             className="btn-danger"
+                            type="button"
                             onClick={() => deleteProduct(product)}
                             disabled={
                               deletingProductId === product.id ||
@@ -516,7 +1197,19 @@ export default function App() {
                       </td>
                       <td>{vendor.owner}</td>
                       <td>
-                        <span className={`status-badge status-${vendor.status.toLowerCase()}`}>
+                        <div>{vendor.subscription?.priceLabel || '-'}</div>
+                        <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '4px' }}>
+                          {vendor.subscription?.endsAt
+                            ? `Until ${formatDateTime(vendor.subscription.endsAt)}`
+                            : vendor.subscription?.label || '-'}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={`status-badge status-${
+                            vendor.statusKey === 'approved' ? 'active' : vendor.statusKey || 'pending'
+                          }`}
+                        >
                           {vendor.status}
                         </span>
                       </td>
@@ -526,16 +1219,28 @@ export default function App() {
                         <div className="row-actions">
                           <button
                             className="btn-secondary"
+                            type="button"
                             onClick={() => showVendorProducts(vendor)}
-                            disabled={deletingVendorId === vendor.id}
+                            disabled={deletingVendorId === vendor.id || approvingVendorId === vendor.id}
                           >
                             <Eye size={16} />
                             View Products
                           </button>
+                          {vendor.statusKey === 'pending' && (
+                            <button
+                              className="btn-primary"
+                              type="button"
+                              onClick={() => approveVendor(vendor)}
+                              disabled={deletingVendorId === vendor.id || approvingVendorId === vendor.id}
+                            >
+                              {approvingVendorId === vendor.id ? 'Approving...' : 'Approve Vendor'}
+                            </button>
+                          )}
                           <button
                             className="btn-danger"
+                            type="button"
                             onClick={() => deleteVendor(vendor)}
-                            disabled={deletingVendorId === vendor.id}
+                            disabled={deletingVendorId === vendor.id || approvingVendorId === vendor.id}
                           >
                             <Trash2 size={16} />
                             {deletingVendorId === vendor.id ? 'Deleting...' : 'Delete Vendor'}

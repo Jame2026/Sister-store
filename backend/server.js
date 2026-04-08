@@ -1,11 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const { randomUUID } = require('crypto');
+const { createHash, randomInt, randomUUID } = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 const { v2: cloudinary } = require('cloudinary');
 const { loadEnvFile } = require('./env');
 const { initializeDatabase, getDatabaseState, getPool } = require('./db');
@@ -16,6 +17,47 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const uploadsRoot = path.join(__dirname, 'uploads');
 const jwtSecret = process.env.JWT_SECRET || 'change-this-secret';
+const passwordResetTtlMinutes = Math.max(
+  5,
+  Number(process.env.PASSWORD_RESET_TTL_MINUTES || 15) || 15
+);
+
+function readOptionalEnvValue(name) {
+  const normalized = String(process.env[name] || '').trim();
+
+  if (!normalized) {
+    return '';
+  }
+
+  if (['null', 'undefined'].includes(normalized.toLowerCase())) {
+    return '';
+  }
+
+  return normalized;
+}
+
+const mailScheme = readOptionalEnvValue('MAIL_SCHEME').toLowerCase();
+const mailHost = readOptionalEnvValue('MAIL_HOST');
+const mailPort = Number(process.env.MAIL_PORT || 0) || 0;
+const mailUsername = readOptionalEnvValue('MAIL_USERNAME');
+const mailPassword = readOptionalEnvValue('MAIL_PASSWORD');
+const mailFromAddress = readOptionalEnvValue('MAIL_FROM_ADDRESS') || mailUsername;
+const mailFromName = readOptionalEnvValue('MAIL_FROM_NAME');
+const mailSecure = ['smtps', 'ssl'].includes(mailScheme) || mailPort === 465;
+const passwordResetMailEnabled = Boolean(
+  mailHost && mailPort > 0 && mailUsername && mailPassword && mailFromAddress
+);
+const mailTransport = passwordResetMailEnabled
+  ? nodemailer.createTransport({
+      host: mailHost,
+      port: mailPort,
+      secure: mailSecure,
+      auth: {
+        user: mailUsername,
+        pass: mailPassword,
+      },
+    })
+  : null;
 const cloudinaryFolderBase = String(process.env.CLOUDINARY_FOLDER || '')
   .trim()
   .replace(/^\/+|\/+$/g, '');
@@ -45,6 +87,37 @@ const allowedImageMimeTypes = new Set([
   'image/webp',
   'image/gif',
 ]);
+const allowedQrImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+
+const vendorSubscriptionPlans = {
+  monthly: {
+    code: 'monthly',
+    label: 'Monthly',
+    priceUsd: 10,
+    priceLabel: '$10 per month',
+    durationDays: 30,
+  },
+  yearly: {
+    code: 'yearly',
+    label: 'Yearly',
+    priceUsd: 100,
+    priceLabel: '$100 per year',
+    durationDays: 365,
+  },
+};
+
+const vendorApprovalStatuses = {
+  pending: {
+    code: 'pending',
+    label: 'Pending Approval',
+    canPublishProducts: false,
+  },
+  approved: {
+    code: 'approved',
+    label: 'Approved',
+    canPublishProducts: true,
+  },
+};
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -76,8 +149,12 @@ app.use(
 app.use(express.json());
 app.use('/uploads', express.static(uploadsRoot));
 
-function ensureDatabase(req, res, next) {
-  const state = getDatabaseState();
+async function ensureDatabase(req, res, next) {
+  let state = getDatabaseState();
+
+  if (!state.ready) {
+    state = await initializeDatabase();
+  }
 
   if (!state.ready) {
     res.status(503).json({
@@ -142,6 +219,152 @@ function validatePassword(password) {
   }
 
   return normalized;
+}
+
+function readVendorSubscriptionPlan(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  const plan = vendorSubscriptionPlans[normalized];
+
+  if (!plan) {
+    throw new Error('Choose a vendor plan: $10 per month or $100 per year.');
+  }
+
+  return plan;
+}
+
+function buildVendorSubscriptionDates(plan, baseDate = new Date()) {
+  const startedAt = new Date(baseDate);
+  const endsAt = new Date(baseDate);
+  endsAt.setDate(endsAt.getDate() + plan.durationDays);
+
+  return {
+    startedAt,
+    endsAt,
+  };
+}
+
+function readVendorApproval(vendor) {
+  const approval =
+    vendorApprovalStatuses[String(vendor.approval_status || 'pending').toLowerCase()] ||
+    vendorApprovalStatuses.pending;
+
+  return {
+    code: approval.code,
+    label: approval.label,
+    approvedAt: vendor.approved_at || null,
+    canPublishProducts: approval.canPublishProducts,
+  };
+}
+
+function validateResetCode(resetCode) {
+  const normalized = String(resetCode || '').trim();
+
+  if (!/^\d{6}$/.test(normalized)) {
+    throw new Error('Enter the 6-digit reset code.');
+  }
+
+  return normalized;
+}
+
+function generatePasswordResetCode() {
+  return String(randomInt(0, 1000000)).padStart(6, '0');
+}
+
+function hashPasswordResetCode(resetCode) {
+  return createHash('sha256').update(String(resetCode)).digest('hex');
+}
+
+function buildPasswordResetExpiry() {
+  return new Date(Date.now() + passwordResetTtlMinutes * 60 * 1000);
+}
+
+function hasPasswordResetExpired(expiresAt) {
+  if (!expiresAt) {
+    return true;
+  }
+
+  const parsed = new Date(expiresAt);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return true;
+  }
+
+  return parsed.getTime() < Date.now();
+}
+
+function formatMailSender() {
+  if (!mailFromAddress) {
+    return '';
+  }
+
+  if (!mailFromName) {
+    return mailFromAddress;
+  }
+
+  return `"${mailFromName.replace(/"/g, '\\"')}" <${mailFromAddress}>`;
+}
+
+function buildPasswordResetMessage({ audienceLabel, resetCode, expiresAt }) {
+  const expiresAtLabel = expiresAt.toLocaleString();
+  const subject = `${audienceLabel} password reset code`;
+  const text = [
+    `You requested a password reset for your ${audienceLabel.toLowerCase()} account.`,
+    '',
+    `Reset code: ${resetCode}`,
+    `This code expires at: ${expiresAtLabel}`,
+    '',
+    'If you did not request this reset, you can ignore this email.',
+  ].join('\n');
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">
+      <p>You requested a password reset for your ${audienceLabel.toLowerCase()} account.</p>
+      <p style="margin: 20px 0;">
+        <strong style="font-size: 24px; letter-spacing: 4px;">${resetCode}</strong>
+      </p>
+      <p>This code expires at <strong>${expiresAtLabel}</strong>.</p>
+      <p>If you did not request this reset, you can ignore this email.</p>
+    </div>
+  `;
+
+  return {
+    subject,
+    text,
+    html,
+  };
+}
+
+async function dispatchPasswordResetCode({ email, audienceLabel, resetCode, expiresAt }) {
+  if (!mailTransport) {
+    return {
+      delivery: 'manual',
+      message:
+        'Reset code created. Email delivery is not configured yet, so use the code shown below to finish resetting the password.',
+      resetCode,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  const message = buildPasswordResetMessage({
+    audienceLabel,
+    resetCode,
+    expiresAt,
+  });
+
+  await mailTransport.sendMail({
+    from: formatMailSender(),
+    to: email,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  });
+
+  return {
+    delivery: 'email',
+    message: `Reset code sent to ${email}. Check your inbox and spam folder.`,
+    expiresAt: expiresAt.toISOString(),
+  };
 }
 
 function readNonNegativeInteger(value, fieldName, fallback = 0) {
@@ -240,6 +463,33 @@ function getFileExtension(file) {
 
 function normalizeUploadPath(filePath) {
   return filePath.split(path.sep).join('/');
+}
+
+function isAllowedQrImageFile(fileName) {
+  return allowedQrImageExtensions.has(path.extname(String(fileName || '')).toLowerCase());
+}
+
+async function findPaymentQrUpload() {
+  const uploadEntries = await fs.promises.readdir(uploadsRoot, {
+    withFileTypes: true,
+  });
+  const fileNames = uploadEntries
+    .filter((entry) => entry.isFile() && isAllowedQrImageFile(entry.name))
+    .map((entry) => entry.name);
+
+  if (!fileNames.length) {
+    return null;
+  }
+
+  const prioritizedFileName =
+    fileNames.find((fileName) => /^image\.(png|jpg|jpeg|webp|gif)$/i.test(fileName)) ||
+    fileNames.find((fileName) => /qr|payment/i.test(fileName)) ||
+    fileNames.sort((left, right) => left.localeCompare(right))[0];
+
+  return {
+    fileName: prioritizedFileName,
+    url: `/uploads/${encodeURIComponent(prioritizedFileName)}`,
+  };
 }
 
 function normalizeStorageFolder(targetFolder) {
@@ -358,6 +608,7 @@ async function deleteUploadedFile(filePathToDelete) {
 function issueToken(vendor) {
   return jwt.sign(
     {
+      role: 'vendor',
       vendorId: vendor.id,
       email: vendor.email,
     },
@@ -368,6 +619,47 @@ function issueToken(vendor) {
   );
 }
 
+function issueAdminToken(admin) {
+  return jwt.sign(
+    {
+      role: 'admin',
+      adminId: admin.id,
+      email: admin.email,
+    },
+    jwtSecret,
+    {
+      expiresIn: '7d',
+    }
+  );
+}
+
+function mapAdminAccount(admin) {
+  return {
+    id: admin.id,
+    email: admin.email,
+    role: 'admin',
+    createdAt: admin.created_at || null,
+    updatedAt: admin.updated_at || null,
+  };
+}
+
+function mapVendorSubscription(vendor) {
+  const plan =
+    vendorSubscriptionPlans[String(vendor.subscription_plan || 'monthly').toLowerCase()] ||
+    vendorSubscriptionPlans.monthly;
+  const startedAt = vendor.subscription_started_at || vendor.created_at || null;
+  const endsAt = vendor.subscription_ends_at || null;
+
+  return {
+    code: plan.code,
+    label: plan.label,
+    priceUsd: plan.priceUsd,
+    priceLabel: plan.priceLabel,
+    startedAt,
+    endsAt,
+  };
+}
+
 function mapVendorAccount(vendor) {
   return {
     id: vendor.id,
@@ -375,6 +667,8 @@ function mapVendorAccount(vendor) {
     role: 'vendor',
     shopId: vendor.shop_id || '',
     shopName: vendor.shop_name || '',
+    approval: readVendorApproval(vendor),
+    subscription: mapVendorSubscription(vendor),
     createdAt: vendor.created_at || null,
     updatedAt: vendor.updated_at || null,
   };
@@ -544,6 +838,47 @@ function formatDateOnly(value) {
   return date.toISOString().slice(0, 10);
 }
 
+async function findAdminByEmail(email) {
+  const [rows] = await getPool().execute(
+    'SELECT * FROM admins WHERE email = ? LIMIT 1',
+    [email]
+  );
+
+  return rows[0] || null;
+}
+
+async function findAdminById(adminId) {
+  const [rows] = await getPool().execute(
+    'SELECT * FROM admins WHERE id = ? LIMIT 1',
+    [adminId]
+  );
+
+  return rows[0] || null;
+}
+
+async function countAdmins() {
+  const [[row]] = await getPool().query('SELECT COUNT(*) AS total_admins FROM admins');
+  return Number(row?.total_admins || 0);
+}
+
+async function storePasswordResetCode(tableName, accountId, resetCode, expiresAt) {
+  await getPool().execute(
+    `UPDATE ${tableName}
+     SET password_reset_code_hash = ?, password_reset_expires_at = ?
+     WHERE id = ?`,
+    [hashPasswordResetCode(resetCode), expiresAt, accountId]
+  );
+}
+
+async function clearPasswordResetCode(tableName, accountId) {
+  await getPool().execute(
+    `UPDATE ${tableName}
+     SET password_reset_code_hash = NULL, password_reset_expires_at = NULL
+     WHERE id = ?`,
+    [accountId]
+  );
+}
+
 async function findVendorByEmail(email) {
   const [rows] = await getPool().execute(
     'SELECT * FROM vendors WHERE email = ? LIMIT 1',
@@ -666,7 +1001,7 @@ async function fetchVendorBookingInsights(vendorId) {
 
       return {
         id: Number(booking.id),
-        channel: booking.channel || 'telegram',
+        channel: booking.channel || 'storefront',
         itemCount: Number(booking.item_count || 0),
         totalQuantity: Number(booking.total_quantity || 0),
         totalAmount: booking.total_amount == null ? null : Number(booking.total_amount),
@@ -684,7 +1019,7 @@ async function fetchAdminOverview() {
   const [[vendorSummary]] = await pool.query(`
     SELECT
       COUNT(*) AS total_vendors,
-      SUM(CASE WHEN shop_id IS NULL OR shop_id = '' THEN 1 ELSE 0 END) AS pending_vendors
+      SUM(CASE WHEN approval_status = 'pending' THEN 1 ELSE 0 END) AS pending_vendors
     FROM vendors
   `);
   const [[productSummary]] = await pool.query(`
@@ -697,15 +1032,30 @@ async function fetchAdminOverview() {
       vendors.email,
       vendors.shop_id,
       vendors.shop_name,
+      vendors.approval_status,
+      vendors.approved_at,
+      vendors.subscription_plan,
+      vendors.subscription_started_at,
+      vendors.subscription_ends_at,
       vendors.created_at,
       COUNT(products.id) AS product_count,
       CASE
-        WHEN vendors.shop_id IS NULL OR vendors.shop_id = '' THEN 'Pending'
-        ELSE 'Active'
+        WHEN vendors.approval_status = 'approved' THEN 'Approved'
+        ELSE 'Pending Approval'
       END AS status
     FROM vendors
     LEFT JOIN products ON products.vendor_id = vendors.id
-    GROUP BY vendors.id, vendors.email, vendors.shop_id, vendors.shop_name, vendors.created_at
+    GROUP BY
+      vendors.id,
+      vendors.email,
+      vendors.shop_id,
+      vendors.shop_name,
+      vendors.approval_status,
+      vendors.approved_at,
+      vendors.subscription_plan,
+      vendors.subscription_started_at,
+      vendors.subscription_ends_at,
+      vendors.created_at
     ORDER BY vendors.created_at DESC
     LIMIT 100
   `);
@@ -738,9 +1088,12 @@ async function fetchAdminOverview() {
       name: vendor.shop_name || 'Shop not created yet',
       owner: vendor.email,
       status: vendor.status,
+      statusKey: readVendorApproval(vendor).code,
       products: Number(vendor.product_count || 0),
       joined: formatDateOnly(vendor.created_at),
       shopId: vendor.shop_id || '',
+      approval: readVendorApproval(vendor),
+      subscription: mapVendorSubscription(vendor),
     })),
   };
 }
@@ -788,6 +1141,14 @@ async function requireOwnedVendor(req, res, next) {
 
   try {
     const payload = jwt.verify(token, jwtSecret);
+
+    if (payload.role !== 'vendor' || !Number.isInteger(Number(payload.vendorId))) {
+      res.status(401).json({
+        error: 'Invalid or expired vendor token.',
+      });
+      return;
+    }
+
     const vendor = await findVendorById(payload.vendorId);
 
     if (!vendor) {
@@ -806,6 +1167,57 @@ async function requireOwnedVendor(req, res, next) {
   }
 }
 
+async function requireApprovedVendor(req, res, next) {
+  if (String(req.vendor?.approval_status || '').toLowerCase() === 'approved') {
+    next();
+    return;
+  }
+
+  res.status(403).json({
+    error: 'Your vendor account is still waiting for admin approval before products can be published.',
+  });
+}
+
+async function requireAdmin(req, res, next) {
+  const authorizationHeader = req.headers.authorization || '';
+
+  if (!authorizationHeader.startsWith('Bearer ')) {
+    res.status(401).json({
+      error: 'Missing admin token.',
+    });
+    return;
+  }
+
+  const token = authorizationHeader.slice('Bearer '.length).trim();
+
+  try {
+    const payload = jwt.verify(token, jwtSecret);
+
+    if (payload.role !== 'admin' || !Number.isInteger(Number(payload.adminId))) {
+      res.status(401).json({
+        error: 'Invalid or expired admin token.',
+      });
+      return;
+    }
+
+    const admin = await findAdminById(Number(payload.adminId));
+
+    if (!admin) {
+      res.status(401).json({
+        error: 'Admin account not found.',
+      });
+      return;
+    }
+
+    req.admin = admin;
+    next();
+  } catch (error) {
+    res.status(401).json({
+      error: 'Invalid or expired admin token.',
+    });
+  }
+}
+
 app.get('/api/health', (req, res) => {
   const state = getDatabaseState();
 
@@ -816,10 +1228,208 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.get('/api/admin/auth/status', ensureDatabase, async (req, res) => {
+  try {
+    const totalAdmins = await countAdmins();
+    res.json({
+      initialized: totalAdmins > 0,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/vendor/auth/payment-qr', async (req, res) => {
+  try {
+    const paymentQr = await findPaymentQrUpload();
+
+    if (!paymentQr) {
+      res.status(404).json({
+        error: 'No payment QR image was found in backend/uploads.',
+      });
+      return;
+    }
+
+    res.json(paymentQr);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/auth/bootstrap', ensureDatabase, async (req, res) => {
+  try {
+    const totalAdmins = await countAdmins();
+
+    if (totalAdmins > 0) {
+      res.status(409).json({
+        error: 'An admin account already exists. Please log in.',
+      });
+      return;
+    }
+
+    const email = validateEmail(req.body.email);
+    const password = validatePassword(req.body.password);
+    const existingAdmin = await findAdminByEmail(email);
+
+    if (existingAdmin) {
+      res.status(409).json({
+        error: 'This admin email is already registered.',
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const [result] = await getPool().execute(
+      'INSERT INTO admins (email, password_hash) VALUES (?, ?)',
+      [email, passwordHash]
+    );
+    const admin = await findAdminById(result.insertId);
+
+    res.status(201).json({
+      token: issueAdminToken(admin),
+      account: mapAdminAccount(admin),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/auth/login', ensureDatabase, async (req, res) => {
+  try {
+    const email = validateEmail(req.body.email);
+    const password = validatePassword(req.body.password);
+    const totalAdmins = await countAdmins();
+
+    if (!totalAdmins) {
+      res.status(403).json({
+        error: 'No admin account exists yet. Create the first admin first.',
+      });
+      return;
+    }
+
+    const admin = await findAdminByEmail(email);
+
+    if (!admin) {
+      res.status(401).json({
+        error: 'Email or password is incorrect.',
+      });
+      return;
+    }
+
+    const passwordMatches = await bcrypt.compare(password, admin.password_hash);
+
+    if (!passwordMatches) {
+      res.status(401).json({
+        error: 'Email or password is incorrect.',
+      });
+      return;
+    }
+
+    res.json({
+      token: issueAdminToken(admin),
+      account: mapAdminAccount(admin),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/auth/forgot-password', ensureDatabase, async (req, res) => {
+  try {
+    const email = validateEmail(req.body.email);
+    const totalAdmins = await countAdmins();
+
+    if (!totalAdmins) {
+      res.status(403).json({
+        error: 'No admin account exists yet. Create the first admin first.',
+      });
+      return;
+    }
+
+    const admin = await findAdminByEmail(email);
+
+    if (!admin) {
+      res.status(404).json({
+        error: 'No admin account matches that email.',
+      });
+      return;
+    }
+
+    const resetCode = generatePasswordResetCode();
+    const expiresAt = buildPasswordResetExpiry();
+    await storePasswordResetCode('admins', admin.id, resetCode, expiresAt);
+    const delivery = await dispatchPasswordResetCode({
+      email: admin.email,
+      audienceLabel: 'Admin',
+      resetCode,
+      expiresAt,
+    });
+
+    res.json(delivery);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/auth/reset-password', ensureDatabase, async (req, res) => {
+  try {
+    const email = validateEmail(req.body.email);
+    const resetCode = validateResetCode(req.body.resetCode);
+    const password = validatePassword(req.body.password);
+    const admin = await findAdminByEmail(email);
+
+    if (!admin) {
+      res.status(404).json({
+        error: 'No admin account matches that email.',
+      });
+      return;
+    }
+
+    if (
+      !admin.password_reset_code_hash ||
+      hasPasswordResetExpired(admin.password_reset_expires_at)
+    ) {
+      await clearPasswordResetCode('admins', admin.id);
+      res.status(400).json({
+        error: 'This reset code has expired. Request a new one.',
+      });
+      return;
+    }
+
+    if (hashPasswordResetCode(resetCode) !== admin.password_reset_code_hash) {
+      res.status(400).json({
+        error: 'The reset code is incorrect.',
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await getPool().execute(
+      `UPDATE admins
+       SET password_hash = ?, password_reset_code_hash = NULL, password_reset_expires_at = NULL
+       WHERE id = ?`,
+      [passwordHash, admin.id]
+    );
+
+    res.json({
+      message: 'Admin password reset successfully. You can sign in with the new password now.',
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/me', ensureDatabase, requireAdmin, async (req, res) => {
+  res.json({
+    account: mapAdminAccount(req.admin),
+  });
+});
+
 app.post('/api/vendor/auth/register', ensureDatabase, async (req, res) => {
   try {
     const email = validateEmail(req.body.email);
     const password = validatePassword(req.body.password);
+    const subscriptionPlan = readVendorSubscriptionPlan(req.body.subscriptionPlan);
     const existingVendor = await findVendorByEmail(email);
 
     if (existingVendor) {
@@ -830,9 +1440,28 @@ app.post('/api/vendor/auth/register', ensureDatabase, async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+    const subscriptionDates = buildVendorSubscriptionDates(subscriptionPlan);
     const [result] = await getPool().execute(
-      'INSERT INTO vendors (email, password_hash, logo) VALUES (?, ?, ?)',
-      [email, passwordHash, 'SS']
+      `INSERT INTO vendors (
+         email,
+         password_hash,
+         logo,
+         approval_status,
+         approved_at,
+         subscription_plan,
+         subscription_started_at,
+         subscription_ends_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        email,
+        passwordHash,
+        'SS',
+        'pending',
+        null,
+        subscriptionPlan.code,
+        subscriptionDates.startedAt,
+        subscriptionDates.endsAt,
+      ]
     );
 
     const vendor = await findVendorById(result.insertId);
@@ -880,6 +1509,82 @@ app.post('/api/vendor/auth/login', ensureDatabase, async (req, res) => {
   }
 });
 
+app.post('/api/vendor/auth/forgot-password', ensureDatabase, async (req, res) => {
+  try {
+    const email = validateEmail(req.body.email);
+    const vendor = await findVendorByEmail(email);
+
+    if (!vendor) {
+      res.status(404).json({
+        error: 'No vendor account matches that email.',
+      });
+      return;
+    }
+
+    const resetCode = generatePasswordResetCode();
+    const expiresAt = buildPasswordResetExpiry();
+    await storePasswordResetCode('vendors', vendor.id, resetCode, expiresAt);
+    const delivery = await dispatchPasswordResetCode({
+      email: vendor.email,
+      audienceLabel: 'Vendor',
+      resetCode,
+      expiresAt,
+    });
+
+    res.json(delivery);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/vendor/auth/reset-password', ensureDatabase, async (req, res) => {
+  try {
+    const email = validateEmail(req.body.email);
+    const resetCode = validateResetCode(req.body.resetCode);
+    const password = validatePassword(req.body.password);
+    const vendor = await findVendorByEmail(email);
+
+    if (!vendor) {
+      res.status(404).json({
+        error: 'No vendor account matches that email.',
+      });
+      return;
+    }
+
+    if (
+      !vendor.password_reset_code_hash ||
+      hasPasswordResetExpired(vendor.password_reset_expires_at)
+    ) {
+      await clearPasswordResetCode('vendors', vendor.id);
+      res.status(400).json({
+        error: 'This reset code has expired. Request a new one.',
+      });
+      return;
+    }
+
+    if (hashPasswordResetCode(resetCode) !== vendor.password_reset_code_hash) {
+      res.status(400).json({
+        error: 'The reset code is incorrect.',
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await getPool().execute(
+      `UPDATE vendors
+       SET password_hash = ?, password_reset_code_hash = NULL, password_reset_expires_at = NULL
+       WHERE id = ?`,
+      [passwordHash, vendor.id]
+    );
+
+    res.json({
+      message: 'Vendor password reset successfully. You can sign in with the new password now.',
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 app.get('/api/vendor/me', ensureDatabase, requireOwnedVendor, async (req, res) => {
   try {
     const dashboard = await fetchVendorDashboard(req.vendor.id);
@@ -919,7 +1624,8 @@ app.put(
 
       await getPool().execute(
         `UPDATE vendors
-         SET shop_id = ?, shop_name = ?, description = ?, location = ?, telegram = ?, logo = ?,
+         SET shop_id = ?, shop_name = ?, description = ?, location = ?, telegram = ?,
+             logo = ?,
              logo_image_url = COALESCE(?, logo_image_url),
              logo_image_path = COALESCE(?, logo_image_path)
          WHERE id = ?`,
@@ -952,6 +1658,7 @@ app.post(
   '/api/vendor/me/products',
   ensureDatabase,
   requireOwnedVendor,
+  requireApprovedVendor,
   upload.fields([{ name: 'productImage', maxCount: 1 }]),
   async (req, res) => {
     try {
@@ -1013,6 +1720,7 @@ app.put(
   '/api/vendor/me/products/:productId',
   ensureDatabase,
   requireOwnedVendor,
+  requireApprovedVendor,
   upload.fields([{ name: 'productImage', maxCount: 1 }]),
   async (req, res) => {
     try {
@@ -1087,7 +1795,12 @@ app.put(
   }
 );
 
-app.delete('/api/vendor/me/products/:productId', ensureDatabase, requireOwnedVendor, async (req, res) => {
+app.delete(
+  '/api/vendor/me/products/:productId',
+  ensureDatabase,
+  requireOwnedVendor,
+  requireApprovedVendor,
+  async (req, res) => {
   try {
     const productId = Number(req.params.productId);
 
@@ -1125,7 +1838,7 @@ app.delete('/api/vendor/me/products/:productId', ensureDatabase, requireOwnedVen
   }
 });
 
-app.get('/api/admin/overview', ensureDatabase, async (req, res) => {
+app.get('/api/admin/overview', ensureDatabase, requireAdmin, async (req, res) => {
   try {
     const overview = await fetchAdminOverview();
     res.json(overview);
@@ -1134,7 +1847,7 @@ app.get('/api/admin/overview', ensureDatabase, async (req, res) => {
   }
 });
 
-app.get('/api/admin/products', ensureDatabase, async (req, res) => {
+app.get('/api/admin/products', ensureDatabase, requireAdmin, async (req, res) => {
   try {
     const products = await listAdminProducts();
     res.json({ products });
@@ -1143,7 +1856,7 @@ app.get('/api/admin/products', ensureDatabase, async (req, res) => {
   }
 });
 
-app.put('/api/admin/products/:productId', ensureDatabase, async (req, res) => {
+app.put('/api/admin/products/:productId', ensureDatabase, requireAdmin, async (req, res) => {
   try {
     res.status(403).json({
       error: 'Admin editing is disabled. Admin can only review and delete.',
@@ -1153,7 +1866,7 @@ app.put('/api/admin/products/:productId', ensureDatabase, async (req, res) => {
   }
 });
 
-app.delete('/api/admin/products/:productId', ensureDatabase, async (req, res) => {
+app.delete('/api/admin/products/:productId', ensureDatabase, requireAdmin, async (req, res) => {
   try {
     const productId = Number(req.params.productId);
 
@@ -1190,7 +1903,64 @@ app.delete('/api/admin/products/:productId', ensureDatabase, async (req, res) =>
   }
 });
 
-app.delete('/api/admin/vendors/:vendorId', ensureDatabase, async (req, res) => {
+app.post('/api/admin/vendors/:vendorId/approve', ensureDatabase, requireAdmin, async (req, res) => {
+  try {
+    const vendorId = Number(req.params.vendorId);
+
+    if (!Number.isInteger(vendorId) || vendorId <= 0) {
+      res.status(400).json({
+        error: 'Invalid vendorId.',
+      });
+      return;
+    }
+
+    const vendor = await findVendorById(vendorId);
+
+    if (!vendor) {
+      res.status(404).json({
+        error: 'Vendor not found.',
+      });
+      return;
+    }
+
+    if (String(vendor.approval_status || '').toLowerCase() === 'approved') {
+      res.json({
+        message: 'Vendor is already approved.',
+        vendor: {
+          id: vendor.id,
+          status: 'Approved',
+          statusKey: 'approved',
+          approval: readVendorApproval(vendor),
+        },
+      });
+      return;
+    }
+
+    const approvedAt = new Date();
+    await getPool().execute(
+      `UPDATE vendors
+       SET approval_status = 'approved', approved_at = ?
+       WHERE id = ?`,
+      [approvedAt, vendorId]
+    );
+
+    const updatedVendor = await findVendorById(vendorId);
+
+    res.json({
+      message: 'Vendor approved successfully.',
+      vendor: {
+        id: updatedVendor.id,
+        status: 'Approved',
+        statusKey: 'approved',
+        approval: readVendorApproval(updatedVendor),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/admin/vendors/:vendorId', ensureDatabase, requireAdmin, async (req, res) => {
   try {
     const vendorId = Number(req.params.vendorId);
 
@@ -1226,7 +1996,10 @@ app.delete('/api/admin/vendors/:vendorId', ensureDatabase, async (req, res) => {
       message: 'Vendor deleted successfully.',
       vendorId,
       deletedProductCount: productRows.length,
-      vendorStatus: vendor.shop_id ? 'Active' : 'Pending',
+      vendorStatus:
+        String(vendor.approval_status || '').toLowerCase() === 'approved'
+          ? 'Approved'
+          : 'Pending Approval',
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1350,8 +2123,8 @@ app.post('/api/shop/:shopId/purchase', ensureDatabase, async (req, res) => {
          currency_suffix,
          currency_decimals,
          items_json
-       )
-       VALUES (?, 'telegram', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+       VALUES (?, 'storefront', ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vendor.id,
         bookingSnapshot.itemCount,
@@ -1378,7 +2151,6 @@ app.post('/api/shop/:shopId/purchase', ensureDatabase, async (req, res) => {
     try {
       await connection.rollback();
     } catch {
-      // Ignore rollback errors when the transaction never started or already completed.
     }
 
     res.status(400).json({ error: error.message });
