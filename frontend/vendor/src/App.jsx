@@ -325,6 +325,9 @@ export default function VendorApp() {
   const [loading, setLoading] = useState(false);
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
   const [recentBookings, setRecentBookings] = useState([]);
+  const [recentBookingsOpen, setRecentBookingsOpen] = useState(false);
+  const [recentProductsOpen, setRecentProductsOpen] = useState(false);
+  const [productHubOpen, setProductHubOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   const [shopId, setShopId] = useState('');
@@ -2016,35 +2019,64 @@ export default function VendorApp() {
                     </div>
                   </div>
 
-                  {recentProducts.length > 0 ? (
-                    <div className="vendor-mini-product-list">
-                      {recentProducts.map((product) => (
-                        <div key={product.id} className="vendor-mini-product">
-                          <div className="vendor-mini-product__media-wrap">
-                            {product.imageUrl ? (
-                              <img src={product.imageUrl} alt={product.name} className="vendor-mini-product__media" />
-                            ) : (
-                              <div className="vendor-product-thumb-fallback">
-                                <Package2 size={18} />
-                              </div>
-                            )}
-                            {product.discountBanner && (
-                              <span className="vendor-product-discount vendor-product-discount--mini">
-                                {product.discountBanner}
-                              </span>
-                            )}
-                          </div>
-                          <div className="vendor-mini-product__copy">
-                            <strong>{product.name}</strong>
-                            <span>{product.price}</span>
-                            <small>
-                              {`${Number(product.stock || 0)} in stock | ${Number(product.sold || 0)} sold`}
-                            </small>
-                          </div>
+                  {recentProducts.length > 0 && (
+                    <div style={{ marginTop: '10px' }}>
+                      <button
+                        type="button"
+                        style={{
+                          ...secondaryButtonStyle,
+                          width: '100%',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          fontSize: '13px',
+                        }}
+                        onClick={() => setRecentProductsOpen(!recentProductsOpen)}
+                      >
+                        <span>{recentProductsOpen ? 'Hide' : 'Show'} Recent Items</span>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '11px',
+                          opacity: 0.8
+                        }}>
+                          <strong>{recentProducts.length}</strong>
+                          <Eye size={14} style={{ opacity: recentProductsOpen ? 0.5 : 1 }} />
                         </div>
-                      ))}
+                      </button>
+
+                      {recentProductsOpen && (
+                        <div className="vendor-mini-product-list vendor-mini-product-list--collapsible" style={{ marginTop: '14px' }}>
+                          {recentProducts.map((product) => (
+                            <div key={product.id} className="vendor-mini-product">
+                              <div className="vendor-mini-product__media-wrap">
+                                {product.imageUrl ? (
+                                  <img src={product.imageUrl} alt={product.name} className="vendor-mini-product__media" />
+                                ) : (
+                                  <div className="vendor-product-thumb-fallback">
+                                    <Package2 size={18} />
+                                  </div>
+                                )}
+                                {product.discountBanner && (
+                                  <span className="vendor-product-discount vendor-product-discount--mini">
+                                    {product.discountBanner}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="vendor-mini-product__copy">
+                                <strong>{product.name}</strong>
+                                <span>{product.price}</span>
+                                <small>
+                                  {`${Number(product.stock || 0)} in stock | ${Number(product.sold || 0)} sold`}
+                                </small>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ) : (
+                  )}
+                  {recentProducts.length === 0 && (
                     <div className="vendor-empty-state">
                       <Package2 size={18} />
                       <strong>No products yet</strong>
@@ -2080,30 +2112,59 @@ export default function VendorApp() {
                     </div>
                   </div>
 
-                  {recentBookings.length > 0 ? (
-                    <div className="vendor-booking-list">
-                      {recentBookings.map((booking) => (
-                        <article key={booking.id} className="vendor-booking-card">
-                          <div className="vendor-booking-card__top">
-                            <div>
-                              <strong>{booking.totalLabel || `Booking #${booking.id}`}</strong>
-                              <span>
-                                {booking.totalQuantity} item{booking.totalQuantity === 1 ? '' : 's'} |{' '}
-                                {formatDateTime(booking.createdAt) || 'Recent booking'}
-                              </span>
-                            </div>
-                            <span className="vendor-booking-card__badge">
-                              {booking.channel === 'telegram' ? 'Telegram' : 'Storefront'}
-                            </span>
-                          </div>
-                          <p>
-                            {booking.itemsPreview ||
-                              `${booking.itemCount} product${booking.itemCount === 1 ? '' : 's'} booked`}
-                          </p>
-                        </article>
-                      ))}
+                  {recentBookings.length > 0 && (
+                    <div style={{ marginTop: '10px' }}>
+                      <button
+                        type="button"
+                        style={{
+                          ...secondaryButtonStyle,
+                          width: '100%',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          fontSize: '13px',
+                        }}
+                        onClick={() => setRecentBookingsOpen(!recentBookingsOpen)}
+                      >
+                        <span>{recentBookingsOpen ? 'Hide' : 'Show'} Recent Orders</span>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '11px',
+                          opacity: 0.8
+                        }}>
+                          <strong>{recentBookings.length}</strong>
+                          <Eye size={14} style={{ opacity: recentBookingsOpen ? 0.5 : 1 }} />
+                        </div>
+                      </button>
+
+                      {recentBookingsOpen && (
+                        <div className="vendor-booking-list vendor-booking-list--collapsible" style={{ marginTop: '14px' }}>
+                          {recentBookings.map((booking) => (
+                            <article key={booking.id} className="vendor-booking-card">
+                              <div className="vendor-booking-card__top">
+                                <div>
+                                  <strong>{booking.totalLabel || `Booking #${booking.id}`}</strong>
+                                  <span>
+                                    {booking.totalQuantity} item{booking.totalQuantity === 1 ? '' : 's'} |{' '}
+                                    {formatDateTime(booking.createdAt) || 'Recent booking'}
+                                  </span>
+                                </div>
+                                <span className="vendor-booking-card__badge">
+                                  {booking.channel === 'telegram' ? 'Telegram' : 'Storefront'}
+                                </span>
+                              </div>
+                              <p>
+                                {booking.itemsPreview ||
+                                  `${booking.itemCount} product${booking.itemCount === 1 ? '' : 's'} booked`}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ) : (
+                  )}
+                  {recentBookings.length === 0 && (
                     <div className="vendor-empty-state">
                       <MessageCircle size={18} />
                       <strong>No orders yet</strong>
@@ -2665,66 +2726,50 @@ export default function VendorApp() {
                         </div>
 
                         <div className="vendor-catalog-media-grid">
-                          <label className="vendor-field vendor-field--catalog">
-                            <span>Product photo</span>
-                            <div className="vendor-catalog-upload-panel">
-                              <div className="vendor-upload-field">
-                                <input
-                                  ref={productInputRef}
-                                  className="vendor-hidden-input"
-                                  type="file"
-                                  accept="image/png,image/jpeg,image/webp,image/gif"
-                                  onChange={(event) => setProductFile(event.target.files?.[0] || null)}
-                                />
-                                <button
-                                  type="button"
-                                  className="vendor-upload-button vendor-upload-button--catalog"
-                                  onClick={() => productInputRef.current?.click()}
-                                >
-                                  <ImagePlus size={16} />
-                                  <span>{productFile ? productFile.name : 'Choose product photo'}</span>
-                                </button>
-                              </div>
-                              <small>
-                                {productFile
-                                  ? 'New photo selected. Review the preview before publishing.'
-                                  : productImage
-                                    ? 'Current photo is ready. Replace it if you want a better storefront image.'
-                                    : 'Use a bright, clear photo so customers can understand the product quickly.'}
-                              </small>
+                          <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                            <span>Product display image</span>
+                            <div 
+                              className={`vendor-catalog-easy-upload ${productImage ? 'has-image' : ''}`}
+                              onClick={() => productInputRef.current?.click()}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <input
+                                ref={productInputRef}
+                                className="vendor-hidden-input"
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/gif"
+                                onChange={(event) => setProductFile(event.target.files?.[0] || null)}
+                              />
+                              {productImage ? (
+                                <>
+                                  <img
+                                    src={productImage}
+                                    alt="Selected product"
+                                    className="vendor-catalog-easy-upload__image"
+                                  />
+                                  <div className="vendor-catalog-easy-upload__overlay">
+                                    <Camera size={24} />
+                                    <span>Change Photo</span>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="vendor-catalog-easy-upload__empty">
+                                  <div className="vendor-catalog-easy-upload__icon">
+                                    <ImagePlus size={32} />
+                                  </div>
+                                  <strong>Add Product Photo</strong>
+                                  <p>Tap here to select a bright and clear photo from your device.</p>
+                                </div>
+                              )}
                             </div>
                           </label>
-
-                          <div
-                            className={`vendor-catalog-inline-preview ${
-                              productImage ? 'has-image' : 'is-empty'
-                            }`}
-                          >
-                            {productImage ? (
-                              <img
-                                src={productImage}
-                                alt="Selected product"
-                                className="vendor-catalog-inline-preview__image"
-                              />
-                            ) : (
-                              <div className="vendor-catalog-inline-preview__empty">
-                                <Package2 size={22} />
-                                <strong>No photo yet</strong>
-                                <span>Upload one to complete the product card.</span>
-                              </div>
-                            )}
-                            <div className="vendor-catalog-inline-preview__meta">
-                              <strong>Storefront photo</strong>
-                              <span>{productImage ? 'Ready for preview' : 'Waiting for upload'}</span>
-                            </div>
-                          </div>
                         </div>
 
                         <label className="vendor-field vendor-field--catalog">
-                          <span>Short description</span>
+                          <span>Product details (Optional)</span>
                           <textarea
-                            style={{ ...inputStyle, minHeight: '128px', resize: 'vertical' }}
-                            placeholder="Tell customers the size, flavor, material, or what makes this product special."
+                            style={{ ...inputStyle, minHeight: '110px', resize: 'vertical' }}
+                            placeholder="Tell your customers about the size, flavor, material, or what makes this product special..."
                             value={productForm.desc}
                             onChange={(event) =>
                               setProductForm((current) => ({
@@ -2734,8 +2779,7 @@ export default function VendorApp() {
                             }
                           />
                           <small>
-                            Keep it short and useful. Focus on the details a customer needs before
-                            ordering.
+                            Provide helpful details to help customers decide. Keep it simple and clear.
                           </small>
                         </label>
                       </div>
@@ -2863,88 +2907,127 @@ export default function VendorApp() {
                     </div>
                   </div>
 
-                  {productHubRows.length === 0 ? (
+                  {productHubRows.length > 0 && (
+                    <div style={{ marginTop: '10px' }}>
+                      <button
+                        type="button"
+                        style={{
+                          ...secondaryButtonStyle,
+                          width: '100%',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          fontSize: '13px',
+                        }}
+                        onClick={() => setProductHubOpen(!productHubOpen)}
+                      >
+                        <span>{productHubOpen ? 'Hide' : 'Show'} Product Table</span>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '11px',
+                          opacity: 0.8
+                        }}>
+                          <strong>{productHubRows.length}</strong>
+                          <Eye size={14} style={{ opacity: productHubOpen ? 0.5 : 1 }} />
+                        </div>
+                      </button>
+
+                      {productHubOpen && (
+                        <div className="vendor-table-wrap vendor-table-wrap--collapsible" style={{ marginTop: '14px' }}>
+                          <table className="vendor-table">
+                            <thead>
+                              <tr>
+                                <th>Product</th>
+                                <th>Price</th>
+                                <th>Stock</th>
+                                <th>Sold</th>
+                                <th>Updated</th>
+                                <th>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {productHubRows.map((product) => {
+                                const stockBadge = getStockBadge(product.stock);
+
+                                return (
+                                  <tr key={product.id} className="vendor-table-row">
+                                    <td data-label="Product">
+                                      <div className="vendor-table-product">
+                                        <div className="vendor-table-product__media">
+                                          {product.imageUrl ? (
+                                            <img
+                                              src={product.imageUrl}
+                                              alt={product.name}
+                                              className="vendor-table-product__image"
+                                            />
+                                          ) : (
+                                            <div className="vendor-product-thumb-fallback">
+                                              <Package2 size={18} />
+                                            </div>
+                                          )}
+                                          {product.discountBanner && (
+                                            <div className="vendor-table-discount-badge">
+                                              {product.discountBanner}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="vendor-table-product__copy">
+                                          <strong>{product.name}</strong>
+                                          <div className="vendor-mobile-hub-meta">
+                                            <span>{product.price}</span>
+                                            <div className="vendor-meta-dot" />
+                                            <span>{stockBadge.label}</span>
+                                          </div>
+                                          <span className="vendor-hub-id-hint">{product.discountBanner || `Product #${product.id}`}</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td data-label="Price" className="vendor-desktop-hub-field">{product.price}</td>
+                                    <td data-label="Stock" className="vendor-desktop-hub-field">
+                                      <span className={`vendor-status-pill ${stockBadge.tone}`}>
+                                        {stockBadge.label}
+                                      </span>
+                                    </td>
+                                    <td data-label="Sold" className="vendor-desktop-hub-field">{product.sold || 0}</td>
+                                    <td data-label="Updated">
+                                      {formatDateTime(product.updatedAt || product.createdAt) || '-'}
+                                    </td>
+                                    <td data-label="Action" className="vendor-table-action">
+                                      <div className="vendor-table-action-group">
+                                        <button
+                                          className="vendor-btn-secondary"
+                                          type="button"
+                                          onClick={() => startEdit(product)}
+                                          disabled={deletingProductId === product.id || !canPublishProducts}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          className="vendor-btn-danger"
+                                          type="button"
+                                          onClick={() => deleteProduct(product.id, product.name)}
+                                          disabled={deletingProductId === product.id || !canPublishProducts}
+                                        >
+                                          <Trash2 size={15} />
+                                          <span>{deletingProductId === product.id ? 'Deleting...' : 'Delete'}</span>
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {productHubRows.length === 0 && (
                     <div className="vendor-empty-state">
                       <Package2 size={18} />
                       <strong>No products in your hub yet</strong>
                       <span>Publish your first product above and it will appear here with stock and status.</span>
-                    </div>
-                  ) : (
-                    <div className="vendor-table-wrap">
-                      <table className="vendor-table">
-                        <thead>
-                          <tr>
-                            <th>Product</th>
-                            <th>Price</th>
-                            <th>Stock</th>
-                            <th>Sold</th>
-                            <th>Updated</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {productHubRows.map((product) => {
-                            const stockBadge = getStockBadge(product.stock);
-
-                            return (
-                              <tr key={product.id} className="vendor-table-row">
-                                <td data-label="Product">
-                                  <div className="vendor-table-product">
-                                    <div className="vendor-table-product__media">
-                                      {product.imageUrl ? (
-                                        <img
-                                          src={product.imageUrl}
-                                          alt={product.name}
-                                          className="vendor-table-product__image"
-                                        />
-                                      ) : (
-                                        <div className="vendor-product-thumb-fallback">
-                                          <Package2 size={18} />
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="vendor-table-product__copy">
-                                      <strong>{product.name}</strong>
-                                      <span>{product.discountBanner || `Product #${product.id}`}</span>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td data-label="Price">{product.price}</td>
-                                <td data-label="Stock">
-                                  <span className={`vendor-status-pill ${stockBadge.tone}`}>
-                                    {stockBadge.label}
-                                  </span>
-                                </td>
-                                <td data-label="Sold">{product.sold || 0}</td>
-                                <td data-label="Updated">
-                                  {formatDateTime(product.updatedAt || product.createdAt) || '-'}
-                                </td>
-                                <td data-label="Action" className="vendor-table-action">
-                                  <div className="vendor-table-action-group">
-                                    <button
-                                      className="vendor-btn-secondary"
-                                      type="button"
-                                      onClick={() => startEdit(product)}
-                                      disabled={deletingProductId === product.id || !canPublishProducts}
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      className="vendor-btn-danger"
-                                      type="button"
-                                      onClick={() => deleteProduct(product.id, product.name)}
-                                      disabled={deletingProductId === product.id || !canPublishProducts}
-                                    >
-                                      <Trash2 size={15} />
-                                      <span>{deletingProductId === product.id ? 'Deleting...' : 'Delete'}</span>
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
                     </div>
                   )}
                 </section>
