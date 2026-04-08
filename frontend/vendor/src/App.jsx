@@ -1575,23 +1575,38 @@ export default function VendorApp() {
                   )}
                 </div>
               )}
-              <input
-                style={inputStyle}
-                type="email"
-                placeholder="Email"
-                value={authForm.email}
-                onChange={(event) => {
-                  const nextEmail = event.target.value;
-                  if (authMode === 'forgot' && resetDetails) {
-                    setResetDetails(null);
-                  }
-                  if (authMode === 'register' && showRegistrationQr) {
-                    setShowRegistrationQr(false);
-                    setNotice('');
-                  }
-                  setAuthForm((current) => ({ ...current, email: nextEmail }));
-                }}
-              />
+              <div className="vendor-field">
+                <div style={{ position: 'relative' }}>
+                  <Search 
+                    size={16} 
+                    style={{ 
+                      position: 'absolute', 
+                      left: '12px', 
+                      top: '50%', 
+                      transform: 'translateY(-50%)',
+                      color: '#94a3b8',
+                      pointerEvents: 'none'
+                    }} 
+                  />
+                  <input
+                    style={{ ...inputStyle, paddingLeft: '38px' }}
+                    type="email"
+                    placeholder="Email Address"
+                    value={authForm.email}
+                    onChange={(event) => {
+                      const nextEmail = event.target.value;
+                      if (authMode === 'forgot' && resetDetails) {
+                        setResetDetails(null);
+                      }
+                      if (authMode === 'register' && showRegistrationQr) {
+                        setShowRegistrationQr(false);
+                        setNotice('');
+                      }
+                      setAuthForm((current) => ({ ...current, email: nextEmail }));
+                    }}
+                  />
+                </div>
+              </div>
               {(authMode !== 'forgot' || resetDetails) && (
                 renderAuthPasswordInput(
                   'password',
