@@ -248,6 +248,11 @@ function apiUrl(path) {
   return `${API_BASE_URL}${path}`;
 }
 
+async function fetchPaymentQrUrl() {
+  const payload = await readApiResponse(await fetch(apiUrl('/api/vendor/auth/payment-qr')));
+  return resolveApiAssetUrl(payload.url || '');
+}
+
 function previewUrl(file) {
   return file ? URL.createObjectURL(file) : '';
 }
@@ -330,7 +335,9 @@ export default function VendorApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
   const [resetDetails, setResetDetails] = useState(null);
+  const [paymentQrUrl, setPaymentQrUrl] = useState('');
   const [paymentQrError, setPaymentQrError] = useState('');
+  const [paymentQrLoading, setPaymentQrLoading] = useState(false);
   const [showRegistrationQr, setShowRegistrationQr] = useState(false);
   const [passwordVisibility, setPasswordVisibility] = useState({
     password: false,
@@ -390,7 +397,6 @@ export default function VendorApp() {
   const selectedSubscriptionPlan =
     vendorSubscriptionPlans.find((plan) => plan.code === authForm.subscriptionPlan) ||
     vendorSubscriptionPlans[0];
-  const paymentQr = resolveApiAssetUrl('/uploads/image.png');
   const subscriptionSummary = currentSubscription
     ? `${currentSubscription.priceLabel}${
         currentSubscription.endsAt ? ` | Active until ${formatDateTime(currentSubscription.endsAt)}` : ''
@@ -828,6 +834,9 @@ export default function VendorApp() {
     setAccount(null);
     setAuthError('');
     setResetDetails(null);
+    setPaymentQrUrl('');
+    setPaymentQrError('');
+    setPaymentQrLoading(false);
     setShowRegistrationQr(false);
     setPasswordVisibility({
       password: false,
@@ -845,6 +854,9 @@ export default function VendorApp() {
     setAuthMode(nextMode);
     setAuthError('');
     setResetDetails(null);
+    setPaymentQrUrl('');
+    setPaymentQrError('');
+    setPaymentQrLoading(false);
     setShowRegistrationQr(false);
     setPasswordVisibility({
       password: false,
@@ -969,6 +981,41 @@ export default function VendorApp() {
   }, []);
 
   useEffect(() => {
+    if (authMode !== 'register' || !showRegistrationQr || paymentQrUrl || paymentQrLoading) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPaymentQr() {
+      setPaymentQrLoading(true);
+      setPaymentQrError('');
+
+      try {
+        const nextPaymentQrUrl = await fetchPaymentQrUrl();
+        if (!cancelled) {
+          setPaymentQrUrl(nextPaymentQrUrl);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPaymentQrUrl('');
+          setPaymentQrError(error.message || 'Unable to load the payment QR image.');
+        }
+      } finally {
+        if (!cancelled) {
+          setPaymentQrLoading(false);
+        }
+      }
+    }
+
+    loadPaymentQr();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode, paymentQrLoading, paymentQrUrl, showRegistrationQr]);
+
+  useEffect(() => {
     if (!accountMenuOpen) {
       return undefined;
     }
@@ -1072,7 +1119,9 @@ export default function VendorApp() {
         }
 
         if (!showRegistrationQr) {
+          setPaymentQrUrl('');
           setPaymentQrError('');
+          setPaymentQrLoading(false);
           setShowRegistrationQr(true);
           setNotice(
             `Your details look good. Scan the QR for ${selectedSubscriptionPlan.priceLabel} ${selectedSubscriptionPlan.cadenceLabel}, then click "I Paid, Create Vendor Account" to finish.`
@@ -1563,22 +1612,32 @@ export default function VendorApp() {
                             padding: '14px',
                           }}
                         >
-                          <img
-                            src={paymentQr}
-                            alt="Vendor payment QR code"
-                            onError={() =>
-                              setPaymentQrError(
-                                'The payment QR image could not be loaded from backend/uploads/image.png.'
-                              )
-                            }
-                            style={{
-                              width: '100%',
-                              maxWidth: '240px',
-                              height: 'auto',
-                              display: 'block',
-                              borderRadius: '10px',
-                            }}
-                          />
+                          {paymentQrLoading ? (
+                            <div style={{ color: '#0f172a', fontWeight: 600 }}>
+                              Loading payment QR...
+                            </div>
+                          ) : paymentQrUrl ? (
+                            <img
+                              src={paymentQrUrl}
+                              alt="Vendor payment QR code"
+                              onError={() =>
+                                setPaymentQrError(
+                                  'The payment QR image could not be loaded from the backend.'
+                                )
+                              }
+                              style={{
+                                width: '100%',
+                                maxWidth: '240px',
+                                height: 'auto',
+                                display: 'block',
+                                borderRadius: '10px',
+                              }}
+                            />
+                          ) : (
+                            <div style={{ color: '#0f172a', fontWeight: 600 }}>
+                              Waiting for payment QR...
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div
