@@ -21,6 +21,10 @@ import {
 import { BrowserRouter, Link, Route, Routes, useParams } from 'react-router-dom';
 import './Customer.css';
 
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '')
+).replace(/\/$/, '');
+
 async function readApiResponse(response) {
   const payload = await response.json().catch(() => ({}));
 
@@ -29,6 +33,43 @@ async function readApiResponse(response) {
   }
 
   return payload;
+}
+
+function apiUrl(path) {
+  return `${API_BASE_URL}${path}`;
+}
+
+function resolveApiAssetUrl(value) {
+  if (!value) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  try {
+    return new URL(value, API_BASE_URL || window.location.origin).toString();
+  } catch {
+    return String(value || '');
+  }
+}
+
+function normalizeShopData(shop) {
+  if (!shop) {
+    return null;
+  }
+
+  return {
+    ...shop,
+    logoImageUrl: resolveApiAssetUrl(shop.logoImageUrl),
+    products: Array.isArray(shop.products)
+      ? shop.products.map((product) => ({
+          ...product,
+          imageUrl: resolveApiAssetUrl(product.imageUrl),
+        }))
+      : [],
+  };
 }
 
 function makeMonogram(value) {
@@ -134,15 +175,7 @@ function buildSelectionTotalText(items) {
 }
 
 function toAbsoluteUrl(value) {
-  if (!value) {
-    return '';
-  }
-
-  try {
-    return new URL(value, window.location.origin).toString();
-  } catch {
-    return String(value || '');
-  }
+  return resolveApiAssetUrl(value);
 }
 
 function getProductStock(product) {
@@ -400,12 +433,12 @@ function ShopInterface() {
 
       try {
         const payload = await readApiResponse(
-          await fetch(`/api/shop/${vendorId}`, {
+          await fetch(apiUrl(`/api/shop/${vendorId}`), {
             signal: controller.signal,
           })
         );
 
-        setShopData(payload.shop);
+        setShopData(normalizeShopData(payload.shop));
         setError('');
       } catch (fetchError) {
         if (fetchError.name === 'AbortError') {
@@ -783,7 +816,7 @@ function ShopInterface() {
         quantity: Number(item.quantity || 0),
       }));
       const payload = await readApiResponse(
-        await fetch(`/api/shop/${vendorId}/purchase`, {
+        await fetch(apiUrl(`/api/shop/${vendorId}/purchase`), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -797,7 +830,7 @@ function ShopInterface() {
         })
       );
 
-      setShopData(payload.shop);
+      setShopData(normalizeShopData(payload.shop));
       setSelectedProducts({});
       setPurchaseNotice(
         'Purchase recorded. Telegram is opening so you can confirm with the vendor.'

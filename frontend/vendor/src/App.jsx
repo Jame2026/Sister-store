@@ -141,6 +141,25 @@ function resolveApiAssetUrl(path) {
   return `${API_BASE_URL}${path}`;
 }
 
+function normalizeProductAsset(product) {
+  return {
+    ...product,
+    imageUrl: resolveApiAssetUrl(product.imageUrl),
+  };
+}
+
+function normalizeShopPayload(shop) {
+  if (!shop) {
+    return null;
+  }
+
+  return {
+    ...shop,
+    logoImageUrl: resolveApiAssetUrl(shop.logoImageUrl),
+    products: Array.isArray(shop.products) ? shop.products.map(normalizeProductAsset) : [],
+  };
+}
+
 function slugify(value) {
   return String(value || '')
     .trim()
@@ -880,21 +899,23 @@ export default function VendorApp() {
   }
 
   function hydrateWorkspace(payload) {
+    const normalizedShop = normalizeShopPayload(payload.shop);
+
     setAccount(payload.account || null);
     setAnalytics(payload.analytics || EMPTY_ANALYTICS);
     setRecentBookings(payload.bookings || []);
 
-    if (payload.shop) {
-      setShopId(payload.shop.shopId);
-      setShopHandleDraft(payload.shop.shopId);
+    if (normalizedShop) {
+      setShopId(normalizedShop.shopId);
+      setShopHandleDraft(normalizedShop.shopId);
       setShopForm({
-        name: payload.shop.name || '',
-        description: payload.shop.description || '',
-        location: payload.shop.location || '',
-        telegram: payload.shop.telegram || '',
-        logoImageUrl: payload.shop.logoImageUrl || '',
+        name: normalizedShop.name || '',
+        description: normalizedShop.description || '',
+        location: normalizedShop.location || '',
+        telegram: normalizedShop.telegram || '',
+        logoImageUrl: normalizedShop.logoImageUrl || '',
       });
-      setProducts(payload.shop.products || []);
+      setProducts(normalizedShop.products || []);
       return;
     }
 
@@ -1260,11 +1281,12 @@ export default function VendorApp() {
           }
         )
       );
+      const normalizedProduct = normalizeProductAsset(payload.product);
 
       setProducts((current) =>
         editingProductId
-          ? current.map((product) => (product.id === payload.product.id ? payload.product : product))
-          : [...current, payload.product]
+          ? current.map((product) => (product.id === normalizedProduct.id ? normalizedProduct : product))
+          : [...current, normalizedProduct]
       );
       resetProductEditor();
       setNotice(payload.message);
