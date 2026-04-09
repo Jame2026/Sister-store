@@ -76,10 +76,11 @@ if (cloudinaryEnabled) {
   });
 }
 
-const allowedOrigins = (process.env.FRONTEND_ORIGINS || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = [
+  'https://online-store-three-xi.vercel.app',
+  'https://vendor-store-beta.vercel.app',
+  'https://customer-store.vercel.app',
+];
 
 const allowedImageMimeTypes = new Set([
   'image/jpeg',
@@ -137,13 +138,24 @@ const upload = multer({
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      if (!origin) {
         callback(null, true);
         return;
       }
 
-      callback(new Error('Origin not allowed by CORS.'));
+      if (allowedOrigins.indexOf(origin) === -1) {
+        callback(
+          new Error(
+            'The CORS policy for this site does not allow access from the specified Origin.'
+          ),
+          false
+        );
+        return;
+      }
+
+      callback(null, true);
     },
+    credentials: true,
   })
 );
 app.use(express.json());
