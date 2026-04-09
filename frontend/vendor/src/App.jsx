@@ -752,14 +752,14 @@ export default function VendorApp() {
       : activeView === 'catalog'
         ? {
             label: !canPublishProducts
-              ? 'Waiting for Approval'
+              ? 'Check Approval'
               : savingProduct
                 ? 'Saving...'
                 : editingProductId
                   ? 'Update Product'
                   : 'Add Product',
             onClick: submitProduct,
-            disabled: savingProduct || !canPublishProducts,
+            disabled: savingProduct,
           }
         : activeView === 'share'
           ? {
@@ -948,6 +948,28 @@ export default function VendorApp() {
     return fetch(apiUrl(url), { ...options, headers });
   }
 
+  async function loadVendorWorkspace(overrideToken = '', options = {}) {
+    const payload = await readApiResponse(await authedFetch('/api/vendor/me', {}, overrideToken));
+
+    if (overrideToken) {
+      setToken(overrideToken);
+    }
+
+    hydrateWorkspace(payload);
+
+    if (!options.silent) {
+      setNotice(
+        payload.account?.approval?.canPublishProducts
+          ? payload.shop
+            ? 'Signed in. Your vendor workspace is ready.'
+            : 'Signed in. Create your shop to start selling.'
+          : 'Signed in. Your vendor account is waiting for admin approval before products can be uploaded.'
+      );
+    }
+
+    return payload;
+  }
+
   useEffect(() => {
     async function restoreSession() {
       const storedToken = getStoredToken();
@@ -959,16 +981,7 @@ export default function VendorApp() {
 
       setLoading(true);
       try {
-        const payload = await readApiResponse(await authedFetch('/api/vendor/me', {}, storedToken));
-        setToken(storedToken);
-        hydrateWorkspace(payload);
-        setNotice(
-          payload.account?.approval?.canPublishProducts
-            ? payload.shop
-              ? 'Signed in. Your vendor workspace is ready.'
-              : 'Signed in. Create your shop to start selling.'
-            : 'Signed in. Your vendor account is waiting for admin approval before products can be uploaded.'
-        );
+        await loadVendorWorkspace(storedToken);
       } catch {
         clearSession('Your previous session expired. Please sign in again.');
       } finally {
@@ -979,6 +992,29 @@ export default function VendorApp() {
 
     restoreSession();
   }, []);
+
+  useEffect(() => {
+    if (!token || !account || canPublishProducts) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const intervalId = setInterval(async () => {
+      try {
+        const payload = await loadVendorWorkspace('', { silent: true });
+
+        if (!cancelled && payload.account?.approval?.canPublishProducts) {
+          setNotice('Your vendor account has been approved. Product publishing is now unlocked.');
+        }
+      } catch {
+      }
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [account, canPublishProducts, token]);
 
   useEffect(() => {
     if (authMode !== 'register' || !showRegistrationQr || paymentQrUrl || paymentQrLoading) {
@@ -1291,8 +1327,23 @@ export default function VendorApp() {
 
   async function submitProduct() {
     if (!canPublishProducts) {
-      setNotice('Your vendor account is still waiting for admin approval before products can be published.');
-      return;
+      setSavingProduct(true);
+
+      try {
+        const payload = await loadVendorWorkspace('', { silent: true });
+
+        if (!payload.account?.approval?.canPublishProducts) {
+          setNotice(
+            'Your vendor account is still waiting for admin approval before products can be published.'
+          );
+          return;
+        }
+      } catch (error) {
+        setNotice(error.message || 'Unable to refresh your vendor approval status.');
+        return;
+      } finally {
+        setSavingProduct(false);
+      }
     }
 
     if (!productForm.name.trim() || !productForm.price.trim()) {
@@ -2894,12 +2945,11 @@ export default function VendorApp() {
                             onClick={submitProduct}
                             disabled={
                               savingProduct ||
-                              deletingProductId === editingProductId ||
-                              !canPublishProducts
+                              deletingProductId === editingProductId
                             }
                           >
                             {!canPublishProducts
-                              ? 'Waiting for Approval'
+                              ? 'Check Approval'
                               : savingProduct
                                 ? 'Saving...'
                                 : editingProductId
