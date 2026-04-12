@@ -81,13 +81,38 @@ const defaultAllowedOrigins = [
   'https://vendor-store-beta.vercel.app',
   'https://customer-store.vercel.app',
 ];
-const configuredAllowedOrigins = readOptionalEnvValue('FRONTEND_ORIGINS')
+const configuredAllowedOriginEntries = readOptionalEnvValue('FRONTEND_ORIGINS')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
-const allowedOrigins = configuredAllowedOrigins.length
-  ? configuredAllowedOrigins
+const allowedOriginEntries = configuredAllowedOriginEntries.length
+  ? configuredAllowedOriginEntries
   : defaultAllowedOrigins;
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildOriginPattern(value) {
+  if (!value.includes('*')) {
+    return null;
+  }
+
+  return new RegExp(`^${escapeRegex(value).replace(/\\\*/g, '.*')}$`);
+}
+
+const allowedOriginPatterns = allowedOriginEntries
+  .map((value) => buildOriginPattern(value))
+  .filter(Boolean);
+const allowedOrigins = allowedOriginEntries.filter((value) => !value.includes('*'));
+
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  return allowedOriginPatterns.some((pattern) => pattern.test(origin));
+}
 
 const allowedImageMimeTypes = new Set([
   'image/jpeg',
@@ -150,7 +175,7 @@ app.use(
         return;
       }
 
-      if (allowedOrigins.indexOf(origin) === -1) {
+      if (!isAllowedOrigin(origin)) {
         callback(
           new Error(
             'The CORS policy for this site does not allow access from the specified Origin.'
