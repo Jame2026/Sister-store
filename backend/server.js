@@ -76,11 +76,18 @@ if (cloudinaryEnabled) {
   });
 }
 
-const allowedOrigins = [
+const defaultAllowedOrigins = [
   'https://online-store-three-xi.vercel.app',
   'https://vendor-store-beta.vercel.app',
   'https://customer-store.vercel.app',
 ];
+const configuredAllowedOrigins = readOptionalEnvValue('FRONTEND_ORIGINS')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+const allowedOrigins = configuredAllowedOrigins.length
+  ? configuredAllowedOrigins
+  : defaultAllowedOrigins;
 
 const allowedImageMimeTypes = new Set([
   'image/jpeg',
