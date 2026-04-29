@@ -2272,12 +2272,12 @@ app.use((error, req, res, next) => {
 });
 
 initializeDatabase().then((state) => {
-  app.listen(port, () => {
-    console.log(`Backend server listening at http://localhost:${port}`);
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`Backend server listening on port ${port}`);
 
     if (state.ready) {
       console.log(
-        `MySQL connected and ready at ${state.config.host}:${state.config.port}/${state.config.database}.`
+        `MySQL connected: ${state.config.host}:${state.config.port}/${state.config.database}`
       );
     } else {
       console.warn(state.error);
