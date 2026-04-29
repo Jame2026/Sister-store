@@ -58,6 +58,8 @@ async function ensureTablesExist(activePool) {
     CREATE TABLE IF NOT EXISTS vendors (
       id INT AUTO_INCREMENT PRIMARY KEY,
       email VARCHAR(255) NOT NULL UNIQUE,
+      full_name VARCHAR(120),
+      phone VARCHAR(32),
       password_hash VARCHAR(255) NOT NULL,
       password_reset_code_hash VARCHAR(64),
       password_reset_expires_at DATETIME NULL,
@@ -193,13 +195,41 @@ async function ensureTablesExist(activePool) {
     `SELECT COUNT(*) AS column_count
      FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = 'vendors'
+      AND TABLE_NAME = 'vendors'
        AND COLUMN_NAME = 'password_reset_code_hash'`
   );
 
   if (!Number(vendorResetHashRows[0]?.column_count || 0)) {
     await activePool.query(
       'ALTER TABLE vendors ADD COLUMN password_reset_code_hash VARCHAR(64) AFTER password_hash'
+    );
+  }
+
+  const [vendorFullNameRows] = await activePool.execute(
+    `SELECT COUNT(*) AS column_count
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'vendors'
+       AND COLUMN_NAME = 'full_name'`
+  );
+
+  if (!Number(vendorFullNameRows[0]?.column_count || 0)) {
+    await activePool.query(
+      'ALTER TABLE vendors ADD COLUMN full_name VARCHAR(120) AFTER email'
+    );
+  }
+
+  const [vendorPhoneRows] = await activePool.execute(
+    `SELECT COUNT(*) AS column_count
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'vendors'
+       AND COLUMN_NAME = 'phone'`
+  );
+
+  if (!Number(vendorPhoneRows[0]?.column_count || 0)) {
+    await activePool.query(
+      'ALTER TABLE vendors ADD COLUMN phone VARCHAR(32) AFTER full_name'
     );
   }
 

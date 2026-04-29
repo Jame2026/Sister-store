@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS admins (
 CREATE TABLE IF NOT EXISTS vendors (
   id INT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
+  full_name VARCHAR(120),
+  phone VARCHAR(32),
   password_hash VARCHAR(255) NOT NULL,
   password_reset_code_hash VARCHAR(64),
   password_reset_expires_at DATETIME NULL,

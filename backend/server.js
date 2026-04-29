@@ -77,6 +77,9 @@ if (cloudinaryEnabled) {
 }
 
 const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
   'https://online-store-three-xi.vercel.app',
   'https://vendor-store-beta.vercel.app',
   'https://customer-store.vercel.app',
@@ -441,6 +444,18 @@ function validateVendorPayload(body) {
   };
 }
 
+function validateVendorAccountPayload(body) {
+  const email = validateEmail(body.email);
+  const fullName = readOptionalString(body.fullName, 120);
+  const phone = readOptionalString(body.phone, 32);
+
+  return {
+    email,
+    fullName,
+    phone,
+  };
+}
+
 function validateProductPayload(body, existingSold = 0, existingStock = 0) {
   const name = readRequiredString(body.name, 'name', 160);
   const price = readRequiredString(body.price, 'price', 40);
@@ -708,6 +723,8 @@ function mapVendorAccount(vendor) {
   return {
     id: vendor.id,
     email: vendor.email,
+    fullName: vendor.full_name || '',
+    phone: vendor.phone || '',
     role: 'vendor',
     shopId: vendor.shop_id || '',
     shopName: vendor.shop_name || '',
@@ -1635,6 +1652,32 @@ app.get('/api/vendor/me', ensureDatabase, requireOwnedVendor, async (req, res) =
     res.json(dashboard);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.put('/api/vendor/me/account', ensureDatabase, requireOwnedVendor, async (req, res) => {
+  try {
+    const payload = validateVendorAccountPayload(req.body);
+
+    if (payload.email !== req.vendor.email) {
+      const existingVendor = await findVendorByEmail(payload.email);
+
+      if (existingVendor && existingVendor.id !== req.vendor.id) {
+        throw new Error('This email is already registered to another vendor account.');
+      }
+    }
+
+    await getPool().execute(
+      `UPDATE vendors
+       SET email = ?, full_name = ?, phone = ?
+       WHERE id = ?`,
+      [payload.email, payload.fullName || null, payload.phone || null, req.vendor.id]
+    );
+
+    const dashboard = await fetchVendorDashboard(req.vendor.id);
+    res.json(dashboard);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 });
 
