@@ -80,9 +80,12 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:5175',
+
   'https://online-store-three-xi.vercel.app',
   'https://vendor-store-beta.vercel.app',
   'https://customer-store.vercel.app',
+
+  'https://online-store-kjqz70bk3-jamekhouen-8551s-projects.vercel.app'
 ];
 
 const configuredAllowedOriginEntries = readOptionalEnvValue('FRONTEND_ORIGINS')
