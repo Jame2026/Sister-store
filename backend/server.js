@@ -176,16 +176,18 @@ const upload = multer({
 
 app.use(cors({
   origin: function (origin, callback) {
-    // allow mobile apps / postman / server-to-server
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') // optional for all Vercel previews
+    ) {
       return callback(null, true);
-    } else {
-      return callback(new Error("Not allowed by CORS"));
     }
+
+    return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true,
+  credentials: true
 }));
 
 
