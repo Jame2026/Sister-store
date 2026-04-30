@@ -107,7 +107,7 @@ function buildOriginPattern(value) {
 const allowedOriginPatterns = allowedOriginEntries
   .map((value) => buildOriginPattern(value))
   .filter(Boolean);
-const allowedOrigins = allowedOriginEntries.filter((value) => !value.includes('*'));
+const filteredOrigins = allowedOriginEntries.filter((value) => !value.includes('*'));
 
 function isAllowedOrigin(origin) {
   if (allowedOrigins.includes(origin)) {
