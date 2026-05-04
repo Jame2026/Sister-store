@@ -94,6 +94,13 @@ const inputStyle = {
   boxShadow: 'inset 0 1px 2px rgba(19, 34, 56, 0.04)',
 };
 
+const compactInputStyle = {
+  ...inputStyle,
+  borderRadius: '10px',
+  padding: '10px 12px',
+  fontSize: '13px',
+};
+
 const buttonStyle = {
   background: 'linear-gradient(135deg, #2d9fdb 0%, #2295d3 100%)',
   color: '#fff',
@@ -116,6 +123,12 @@ const secondaryButtonStyle = {
   border: `1px solid ${LIGHT_THEME.primaryBorder}`,
   color: LIGHT_THEME.text,
   boxShadow: '0 10px 24px rgba(19, 34, 56, 0.05)',
+};
+
+const compactSecondaryButtonStyle = {
+  ...secondaryButtonStyle,
+  padding: '10px 14px',
+  fontSize: '13px',
 };
 
 const passwordFieldShellStyle = {
@@ -448,55 +461,6 @@ export default function VendorApp() {
       ? `Approved on ${formatDateTime(vendorApproval.approvedAt)}`
       : 'Approved by admin'
     : 'Waiting for admin approval before product uploads are enabled';
-  const catalogStatusTone = canPublishProducts ? 'is-good' : 'is-warning';
-  const catalogWorkspaceTitle = editingProductId
-    ? 'Update a product that is already in your catalog'
-    : 'Manage the products customers will browse in your storefront';
-  const catalogWorkspaceDescription = canPublishProducts
-    ? 'Add products, keep stock current, and review the customer-facing preview before publishing.'
-    : 'Prepare the product details here now, then publish them as soon as admin approval is complete.';
-  const catalogFocusPills = canPublishProducts
-    ? ['Add products', 'Update stock', 'Review preview']
-    : ['Prepare details', 'Review preview', 'Wait for approval'];
-  const catalogStatusTitle = canPublishProducts
-    ? 'Publishing is unlocked'
-    : 'Publishing is waiting for approval';
-  const catalogStatusDescription = canPublishProducts
-    ? 'This workspace is fully active. You can add, update, and remove products from here.'
-    : 'You can prepare product information now, but the publish button will stay locked until an admin approves your vendor account.';
-  const catalogActionGroups = canPublishProducts
-    ? [
-        {
-          title: 'Use this workspace to',
-          items: [
-            'Add or update products with price, stock, and image',
-            'Keep the storefront accurate as inventory changes',
-          ],
-        },
-        {
-          title: 'Before publishing',
-          items: [
-            'Check the preview card customers will see',
-            'Use clear descriptions and discount labels when needed',
-          ],
-        },
-      ]
-    : [
-        {
-          title: 'You can do now',
-          items: [
-            'Complete the name, price, stock, image, and description',
-            'Review the customer preview before products go live',
-          ],
-        },
-        {
-          title: 'Unlocks after approval',
-          items: [
-            'Publish products to the storefront',
-            'Edit or remove live catalog items anytime',
-          ],
-        },
-      ];
   const previewTelegram = shopForm.telegram
     ? `@${shopForm.telegram.replace(/^@+/, '')}`
     : '@yourtelegram';
@@ -504,6 +468,7 @@ export default function VendorApp() {
   const trimmedProductName = productForm.name.trim();
   const trimmedProductPrice = productForm.price.trim();
   const trimmedProductDescription = productForm.desc.trim();
+  const trimmedDiscountBanner = productForm.discountBanner.trim();
   const trimmedAccountFullName = accountForm.fullName.trim();
   const trimmedAccountPhone = accountForm.phone.trim();
   const trimmedAccountEmail = accountForm.email.trim().toLowerCase();
@@ -511,8 +476,27 @@ export default function VendorApp() {
   const trimmedShopDescription = shopForm.description.trim();
   const trimmedShopLocation = shopForm.location.trim();
   const trimmedShopTelegram = shopForm.telegram.trim();
-  const descriptionCharacterCount = trimmedShopDescription.length;
   const locationAndContactReady = Boolean(trimmedShopLocation && trimmedShopTelegram);
+  const productBasicsReady = Boolean(trimmedProductName && trimmedProductPrice);
+  const productPhotoReady = Boolean(productImage);
+  const productExtrasReady = Boolean(trimmedDiscountBanner || trimmedProductDescription);
+  const productSetupCount = [productBasicsReady, productPhotoReady, productExtrasReady].filter(
+    Boolean
+  ).length;
+  const productSetupSummary = editingProductId
+    ? 'Update the parts you need, then check the preview before saving.'
+    : productSetupCount === 0
+      ? 'Start with the product name and price. The rest can follow right after.'
+      : productSetupCount === 1
+        ? 'Good start. Add a photo next so customers trust the product faster.'
+        : productSetupCount === 2
+          ? 'Almost done. Add any finishing details you want.'
+          : 'Everything is ready. Review the preview and publish when you are happy.';
+  const productSetupSteps = [
+    { label: '1. Basics', done: productBasicsReady, optional: false },
+    { label: '2. Photo', done: productPhotoReady, optional: false },
+    { label: '3. Extras', done: productExtrasReady, optional: true },
+  ];
   const missingStorePublishFields = [];
   if (!trimmedShopName) {
     missingStorePublishFields.push('shop name');
@@ -520,95 +504,6 @@ export default function VendorApp() {
   if (!trimmedShopTelegram) {
     missingStorePublishFields.push('Telegram');
   }
-  const missingStorePublishFieldsSummary = joinWithAnd(missingStorePublishFields);
-  const canSaveStoreDuringPublish =
-    !hasShop && missingStorePublishFields.length === 0 && Boolean(resolvedHandle);
-  const publishChecklist = useMemo(
-    () => [
-      {
-        key: 'approval',
-        label: 'Vendor approval',
-        value: canPublishProducts ? 'Approved by admin' : 'Still waiting for admin approval',
-        done: canPublishProducts,
-        required: true,
-      },
-      {
-        key: 'store',
-        label: 'Store page',
-        value: hasShop
-          ? `Saved as /${shopId}`
-          : canSaveStoreDuringPublish
-            ? `First publish will save /${displayHandle}`
-            : `Add ${missingStorePublishFieldsSummary} in Store Profile`,
-        done: hasShop || canSaveStoreDuringPublish,
-        required: true,
-      },
-      {
-        key: 'name',
-        label: 'Product name',
-        value: trimmedProductName || 'Add a product name customers will recognize quickly',
-        done: Boolean(trimmedProductName),
-        required: true,
-      },
-      {
-        key: 'price',
-        label: 'Price label',
-        value: trimmedProductPrice || 'Add a simple label like $25 or 25 USD',
-        done: Boolean(trimmedProductPrice),
-        required: true,
-      },
-      {
-        key: 'photo',
-        label: 'Product photo',
-        value: productImage ? 'Image selected for the storefront card' : 'Optional, but strongly recommended',
-        done: Boolean(productImage),
-        required: false,
-      },
-      {
-        key: 'details',
-        label: 'Short details',
-        value: trimmedProductDescription
-          ? 'Description added for shoppers'
-          : 'Optional, but useful for size, flavor, or delivery notes',
-        done: Boolean(trimmedProductDescription),
-        required: false,
-      },
-    ],
-    [
-      canPublishProducts,
-      canSaveStoreDuringPublish,
-      displayHandle,
-      hasShop,
-      missingStorePublishFieldsSummary,
-      productImage,
-      shopId,
-      trimmedProductDescription,
-      trimmedProductName,
-      trimmedProductPrice,
-    ]
-  );
-  const publishRequiredItems = publishChecklist.filter((item) => item.required);
-  const publishRequiredCompleteCount = publishRequiredItems.filter((item) => item.done).length;
-  const publishReadyCount = publishChecklist.filter((item) => item.done).length;
-  const publishBlockers = publishRequiredItems.filter((item) => !item.done);
-  const publishReadinessTitle = !canPublishProducts
-    ? 'Waiting for vendor approval'
-    : publishBlockers.length === 0
-      ? canSaveStoreDuringPublish
-        ? 'Ready to save the store and publish'
-        : 'Ready to publish now'
-      : publishBlockers.some((item) => item.key === 'store')
-        ? 'Store setup is needed first'
-        : 'Add the last required product details';
-  const publishReadinessDescription = !canPublishProducts
-    ? 'Your product form can be prepared now, but the product will go live only after an admin approves your vendor account.'
-    : publishBlockers.length === 0
-      ? canSaveStoreDuringPublish
-        ? `When you click publish, we will save /${displayHandle} first and then put this product live.`
-        : 'Everything required is ready. You can publish this product to the storefront now.'
-      : publishBlockers.some((item) => item.key === 'store')
-        ? `Before the first product goes live, add ${missingStorePublishFieldsSummary} in Store Profile.`
-        : 'Finish the required product fields below so customers can see a complete product card.';
   const catalogSubmitButtonLabel = !canPublishProducts
     ? savingProduct
       ? 'Checking...'
@@ -2253,30 +2148,32 @@ export default function VendorApp() {
             </section>
           </div>
 
-          <section className="vendor-mobile-shell">
-            <div className="vendor-mobile-shell__stats vendor-mobile-shell__stats--summary">
-              {summaryCards.map((card) => {
-                const Icon = card.icon;
+          {activeView === 'overview' && (
+            <section className="vendor-mobile-shell">
+              <div className="vendor-mobile-shell__stats vendor-mobile-shell__stats--summary">
+                {summaryCards.map((card) => {
+                  const Icon = card.icon;
 
-                return (
-                  <article
-                    className="vendor-mobile-summary-chip"
-                    key={`mobile-${card.label}`}
-                    style={{ '--vendor-accent': card.color }}
-                  >
-                    <div
-                      className="vendor-mobile-summary-chip__icon"
-                      style={{ backgroundColor: `${card.color}18`, color: card.color }}
+                  return (
+                    <article
+                      className="vendor-mobile-summary-chip"
+                      key={`mobile-${card.label}`}
+                      style={{ '--vendor-accent': card.color }}
                     >
-                      <Icon size={16} />
-                    </div>
-                    <small>{card.label}</small>
-                    <strong>{card.value}</strong>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
+                      <div
+                        className="vendor-mobile-summary-chip__icon"
+                        style={{ backgroundColor: `${card.color}18`, color: card.color }}
+                      >
+                        <Icon size={16} />
+                      </div>
+                      <small>{card.label}</small>
+                      <strong>{card.value}</strong>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <div
             className={`page-header vendor-page-header ${
@@ -2321,31 +2218,33 @@ export default function VendorApp() {
             </div>
           )}
 
-          <div className={`vendor-summary-grid ${activeView === 'overview' ? 'vendor-summary-grid--overview' : ''}`}>
-            {summaryCards.map((card) => {
-              const Icon = card.icon;
+          {activeView === 'overview' && (
+            <div className="vendor-summary-grid vendor-summary-grid--overview">
+              {summaryCards.map((card) => {
+                const Icon = card.icon;
 
-              return (
-                <article
-                  className="vendor-summary-card"
-                  key={card.label}
-                  style={{ '--vendor-accent': card.color }}
-                >
-                  <div className="vendor-summary-card__top">
-                    <span>{card.label}</span>
-                    <div
-                      className="vendor-summary-card__icon"
-                      style={{ backgroundColor: `${card.color}18`, color: card.color }}
-                    >
-                      <Icon size={18} />
+                return (
+                  <article
+                    className="vendor-summary-card"
+                    key={card.label}
+                    style={{ '--vendor-accent': card.color }}
+                  >
+                    <div className="vendor-summary-card__top">
+                      <span>{card.label}</span>
+                      <div
+                        className="vendor-summary-card__icon"
+                        style={{ backgroundColor: `${card.color}18`, color: card.color }}
+                      >
+                        <Icon size={18} />
+                      </div>
                     </div>
-                  </div>
-                  <strong>{card.value}</strong>
-                  <p>{card.helper}</p>
-                </article>
-              );
-            })}
-          </div>
+                    <strong>{card.value}</strong>
+                    <p>{card.helper}</p>
+                  </article>
+                );
+              })}
+            </div>
+          )}
 
             {activeView === 'overview' && (
               <div className="vendor-dashboard-shell vendor-dashboard-shell--overview">
@@ -2836,18 +2735,6 @@ export default function VendorApp() {
             {activeView === 'store' && (
               <div className="vendor-profile-shell">
                 <section className="vendor-panel-card vendor-profile-editor" style={cardStyle}>
-                  <div className="vendor-section-head">
-                    <div>
-                      <span className="vendor-section-kicker">Store Profile</span>
-                      <h2>Set up the shop page customers will understand quickly</h2>
-                      <p>Add the name, location, contact, and short description customers need before they message or order.</p>
-                    </div>
-                    <div className="vendor-pill">
-                      <Store size={14} />
-                      <span>{hasShop ? 'Shop page ready' : 'Setup in progress'}</span>
-                    </div>
-                  </div>
-
                   <div className="vendor-profile-banner">
                     <div className="vendor-profile-banner__identity">
                       <div className="vendor-logo-orb vendor-logo-orb--small">
@@ -2940,7 +2827,7 @@ export default function VendorApp() {
                       </div>
                     </section>
 
-                    <section className="vendor-profile-section-card vendor-profile-section-card--guided">
+                    <section className="vendor-profile-section-card vendor-profile-section-card--guided vendor-profile-section-card--compact">
                       <div className="vendor-profile-section-card__head vendor-profile-section-card__head--guided">
                         <div>
                           <span>Step 2</span>
@@ -2966,9 +2853,9 @@ export default function VendorApp() {
                       <div className="vendor-form-grid vendor-form-grid--store">
                         <label className="vendor-field vendor-field--guided">
                           <span>City, pickup place, or delivery area</span>
-                          <div style={{ display: 'grid', gap: '10px' }}>
+                          <div className="vendor-location-stack">
                             <input
-                              style={inputStyle}
+                              style={compactInputStyle}
                               placeholder="Battambang city, pickup at Psar Nat"
                               value={shopForm.location}
                               onChange={(event) =>
@@ -2981,7 +2868,7 @@ export default function VendorApp() {
                             <button
                               type="button"
                               style={{
-                                ...secondaryButtonStyle,
+                                ...compactSecondaryButtonStyle,
                                 width: '100%',
                                 opacity: detectingLocation ? 0.7 : 1,
                                 cursor: detectingLocation ? 'wait' : 'pointer',
@@ -3014,7 +2901,7 @@ export default function VendorApp() {
                         <label className="vendor-field vendor-field--guided">
                           <span>Telegram for customer messages</span>
                           <input
-                            style={inputStyle}
+                            style={compactInputStyle}
                             placeholder="@yourtelegram"
                             value={shopForm.telegram}
                             onChange={(event) =>
@@ -3034,30 +2921,6 @@ export default function VendorApp() {
                     </section>
 
                     <section className="vendor-profile-section-card vendor-profile-section-card--full vendor-profile-section-card--guided">
-                      <div className="vendor-profile-section-card__head vendor-profile-section-card__head--guided">
-                        <div>
-                          <span>Step 3</span>
-                          <strong>Write a short shop introduction</strong>
-                          <p>Use simple words to explain what you sell and what customers can expect.</p>
-                        </div>
-                        <div className={`vendor-inline-status ${trimmedShopDescription ? 'is-ready' : ''}`}>
-                          {trimmedShopDescription
-                            ? `${descriptionCharacterCount} characters written`
-                            : 'Keep it short and friendly'}
-                        </div>
-                      </div>
-
-                      <div className="vendor-profile-quick-help vendor-profile-quick-help--writing">
-                        <div className="vendor-profile-quick-help__item">
-                          <span>Simple format</span>
-                          <strong>What you sell, where you help, and one warm detail</strong>
-                        </div>
-                        <div className="vendor-profile-quick-help__item">
-                          <span>Best length</span>
-                          <strong>One or two short sentences is enough</strong>
-                        </div>
-                      </div>
-
                       <label className="vendor-field vendor-field--guided">
                         <span>Short message for customers</span>
                         <textarea
@@ -3082,24 +2945,6 @@ export default function VendorApp() {
                         </div>
                       </label>
                     </section>
-                  </div>
-
-                  <div className="vendor-profile-guide">
-                    <div className="vendor-note-card">
-                      <span>Step 1</span>
-                      <strong>Use a clear shop name</strong>
-                      <p>Pick a name customers can remember and match it with a simple picture or logo.</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Step 2</span>
-                      <strong>Add location and one contact</strong>
-                      <p>Show customers where you are and give them one Telegram username they can message easily.</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Step 3</span>
-                      <strong>Write a short welcome message</strong>
-                      <p>Use a simple sentence or two so shoppers quickly understand what your store sells.</p>
-                    </div>
                   </div>
 
                   <div className="vendor-form-actions">
@@ -3158,72 +3003,8 @@ export default function VendorApp() {
                     </div>
                   </div>
 
-                  <div className="vendor-note-stack">
-                    <div className="vendor-note-card">
-                      <span>What customers notice first</span>
-                      <strong>Name, about text, and location</strong>
-                      <p>Those details should work together so the shop feels real, local, and easy to understand at a glance.</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Fast trust signal</span>
-                      <strong>
-                        {shopForm.telegram && shopForm.location ? 'Location and contact included' : 'Add location and contact'}
-                      </strong>
-                      <p>Stores feel more credible when customers know where the shop is based and where to ask questions.</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Public Handle</span>
-                      <strong>/{displayHandle}</strong>
-                      <p>{hasShop ? 'This is the public link customers can remember and revisit.' : 'Save the profile to lock in this public address.'}</p>
-                    </div>
-                  </div>
                 </section>
 
-                <section className="vendor-panel-card" style={cardStyle}>
-                  <div className="vendor-section-head vendor-section-head--stacked">
-                    <div>
-                      <span className="vendor-section-kicker">Readiness Review</span>
-                      <h2>Check the details that shape trust</h2>
-                      <p>These profile checkpoints help you spot what still needs attention before you promote the store.</p>
-                    </div>
-                  </div>
-
-                  <div className="vendor-profile-review-summary">
-                    <strong>{storeDetailsReadyLabel}</strong>
-                    <span>{profileHealthLabel}</span>
-                  </div>
-
-                  <div className="vendor-dashboard-checklist vendor-dashboard-checklist--stacked vendor-dashboard-checklist--detailed">
-                    {profileChecklist.map((item) => (
-                      <div
-                        key={item.label}
-                        className={`vendor-dashboard-check vendor-dashboard-check--detailed ${item.done ? 'is-done' : ''}`}
-                      >
-                        <div className={`vendor-dashboard-check__status ${item.done ? 'is-done' : ''}`}>
-                          {item.done ? 'Ready' : 'Add'}
-                        </div>
-                        <div className="vendor-dashboard-check__body">
-                          <span>{item.label}</span>
-                          <strong>{item.value}</strong>
-                          <p>{item.helper}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="vendor-note-stack vendor-note-stack--compact">
-                    <div className="vendor-note-card">
-                      <span>Public Handle</span>
-                      <strong>/{displayHandle}</strong>
-                      <p>{hasShop ? 'This is the live address customers can remember and revisit.' : 'Save the profile to reserve the storefront link.'}</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Store Location</span>
-                      <strong>{previewLocation}</strong>
-                      <p>Clear location details make pickup, delivery, and local availability easier to understand.</p>
-                    </div>
-                  </div>
-                </section>
                 </div>
               </div>
             )}
@@ -3231,77 +3012,6 @@ export default function VendorApp() {
             {activeView === 'catalog' && (
               <div className="vendor-stack">
                 <section className="vendor-panel-card" style={cardStyle}>
-                  <div className="vendor-catalog-workspace">
-                    <div className="vendor-catalog-head-card">
-                      <div className="vendor-catalog-head-card__row">
-                        <div className="vendor-catalog-head-card__copy">
-                          <span>Catalog Workspace</span>
-                          <strong>{catalogWorkspaceTitle}</strong>
-                          <p>{catalogWorkspaceDescription}</p>
-                        </div>
-                        <div className="vendor-pill">
-                          <Package2 size={14} />
-                          <span>{products.length} live</span>
-                        </div>
-                      </div>
-
-                      <div className="vendor-catalog-focus-pills">
-                        {catalogFocusPills.map((item) => (
-                          <span key={item} className="vendor-catalog-focus-pill">
-                            {item}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="vendor-catalog-status-card">
-                      <div className="vendor-catalog-status-card__head">
-                        <div className="vendor-catalog-status-card__copy">
-                          <span>Publishing access</span>
-                          <strong>{catalogStatusTitle}</strong>
-                          <p>{catalogStatusDescription}</p>
-                        </div>
-                        <span className={`vendor-status-pill ${catalogStatusTone}`}>
-                          {vendorApproval.label}
-                        </span>
-                      </div>
-
-                      <div className="vendor-catalog-status-groups">
-                        {catalogActionGroups.map((group) => (
-                          <div key={group.title} className="vendor-catalog-status-group">
-                            <span>{group.title}</span>
-                            <ul>
-                              {group.items.map((item) => (
-                                <li key={item}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
-                      </div>
-
-                      <p className="vendor-catalog-status-card__meta">{approvalSummary}</p>
-                    </div>
-                  </div>
-
-                  <div className="vendor-hub-stats vendor-hub-stats--catalog">
-                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
-                      <span>Live products</span>
-                      <strong>{products.length}</strong>
-                    </div>
-                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
-                      <span>Units tracked</span>
-                      <strong>{totalStock}</strong>
-                    </div>
-                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
-                      <span>Need restock</span>
-                      <strong>{lowStockCount}</strong>
-                    </div>
-                    <div className="vendor-hub-stat vendor-hub-stat--catalog">
-                      <span>Out of stock</span>
-                      <strong>{outOfStockCount}</strong>
-                    </div>
-                  </div>
-
                   <div className="vendor-catalog-editor">
                     <div className="vendor-catalog-editor__form">
                       <div className="vendor-catalog-editor__intro">
@@ -3317,198 +3027,249 @@ export default function VendorApp() {
                         </p>
                       </div>
 
-                      <div className="vendor-catalog-readiness">
-                        <div className="vendor-catalog-readiness__head">
-                          <div className="vendor-catalog-readiness__copy">
-                            <span>Publish readiness</span>
-                            <strong>{publishReadinessTitle}</strong>
-                            <p>{publishReadinessDescription}</p>
-                          </div>
-                          <span className={`vendor-status-pill ${publishBlockers.length === 0 ? 'is-good' : 'is-warning'}`}>
-                            {publishRequiredCompleteCount}/{publishRequiredItems.length} required
-                          </span>
-                        </div>
-
-                        <div className="vendor-catalog-readiness__grid">
-                          {publishChecklist.map((item) => (
-                            <div
-                              key={item.key}
-                              className={`vendor-catalog-readiness__item ${
-                                item.done ? 'is-done' : ''
-                              } ${item.required ? '' : 'is-optional'}`}
-                            >
-                              <span>{item.required ? 'Required' : 'Helpful'}</span>
-                              <strong>{item.label}</strong>
-                              <p>{item.value}</p>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="vendor-catalog-readiness__footer">
-                          <strong>{publishReadyCount}/{publishChecklist.length} checklist items ready</strong>
-                          {!hasShop ? (
-                            <button
-                              style={secondaryButtonStyle}
-                              type="button"
-                              onClick={() => setActiveView('store')}
-                            >
-                              Complete Store Profile
-                            </button>
-                          ) : (
-                            <button
-                              style={secondaryButtonStyle}
-                              type="button"
-                              onClick={openShopPreview}
-                              disabled={!shopLink}
-                            >
-                              Preview Store
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
                       <div className="vendor-catalog-upload-card">
                         <div className="vendor-catalog-upload-card__head">
                           <div className="vendor-catalog-upload-card__copy">
                             <span>Quick product setup</span>
-                            <strong>Everything needed for a strong product card</strong>
-                            <p>
-                              Keep the information simple, clear, and easy for customers to scan.
-                            </p>
+                            <strong>
+                              {editingProductId
+                                ? 'Update this product in 3 easy parts'
+                                : 'Complete this product in 3 easy parts'}
+                            </strong>
+                            <p>{productSetupSummary}</p>
                           </div>
                           <div className="vendor-catalog-upload-card__tags">
-                            <span className="vendor-catalog-upload-tag">Name</span>
-                            <span className="vendor-catalog-upload-tag">Price</span>
-                            <span className="vendor-catalog-upload-tag">Photo</span>
-                            <span className="vendor-catalog-upload-tag is-muted">Description</span>
+                            {productSetupSteps.map((step) => (
+                              <span
+                                className={`vendor-catalog-upload-tag ${
+                                  step.done ? 'is-ready' : step.optional ? 'is-muted' : ''
+                                }`}
+                                key={step.label}
+                              >
+                                {step.label}
+                              </span>
+                            ))}
                           </div>
                         </div>
 
-                        <div className="vendor-catalog-primary-grid">
-                          <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
-                            <span>Name customers will see</span>
-                            <input
-                              style={inputStyle}
-                              placeholder="Organic mango jam"
-                              value={productForm.name}
-                              onChange={(event) =>
-                                setProductForm((current) => ({
-                                  ...current,
-                                  name: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-
-                          <label className="vendor-field vendor-field--catalog">
-                            <span>Price label</span>
-                            <input
-                              style={inputStyle}
-                              placeholder="$25"
-                              value={productForm.price}
-                              onChange={(event) =>
-                                setProductForm((current) => ({
-                                  ...current,
-                                  price: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-
-                          <label className="vendor-field vendor-field--catalog">
-                            <span>Stock available</span>
-                            <input
-                              style={inputStyle}
-                              type="number"
-                              min="0"
-                              step="1"
-                              placeholder="12"
-                              value={productForm.stock}
-                              onChange={(event) =>
-                                setProductForm((current) => ({
-                                  ...current,
-                                  stock: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-
-                          <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
-                            <span>Discount badge</span>
-                            <input
-                              style={inputStyle}
-                              placeholder="20% OFF"
-                              value={productForm.discountBanner}
-                              onChange={(event) =>
-                                setProductForm((current) => ({
-                                  ...current,
-                                  discountBanner: event.target.value,
-                                }))
-                              }
-                            />
-                            <small>Optional. Add this only when you want a short promotion label on the product card.</small>
-                          </label>
-                        </div>
-
-                        <div className="vendor-catalog-media-grid">
-                          <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
-                            <span>Product display image</span>
-                            <div 
-                              className={`vendor-catalog-easy-upload ${productImage ? 'is-ready' : ''}`}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              <input
-                                ref={productInputRef}
-                                className="vendor-hidden-input"
-                                type="file"
-                                accept="image/png,image/jpeg,image/webp,image/gif"
-                                onClick={(event) => {
-                                  event.currentTarget.value = '';
-                                }}
-                                onChange={(event) => setProductFile(event.target.files?.[0] || null)}
-                              />
-                              {productImage ? (
-                                <div className="vendor-catalog-easy-upload__empty vendor-catalog-easy-upload__empty--selected">
-                                  <div className="vendor-catalog-easy-upload__icon">
-                                    <ImagePlus size={32} />
-                                  </div>
-                                  <strong>{productFile ? 'Photo Selected' : 'Current Photo Ready'}</strong>
-                                  <p>
-                                    {productFile?.name
-                                      ? `${productFile.name} is selected. The actual image preview appears in the product card on the right.`
-                                      : 'This product already has a saved photo. Use the product preview card on the right to see it.'}
-                                  </p>
-                                </div>
-                              ) : (
-                                <div className="vendor-catalog-easy-upload__empty">
-                                  <div className="vendor-catalog-easy-upload__icon">
-                                    <ImagePlus size={32} />
-                                  </div>
-                                  <strong>Add Product Photo</strong>
-                                  <p>Tap here to select a bright and clear photo from your device.</p>
-                                </div>
-                              )}
+                        <div className="vendor-catalog-form-sections">
+                          <section className="vendor-catalog-form-section">
+                            <div className="vendor-catalog-form-section__head vendor-catalog-form-section__head--with-status">
+                              <div>
+                                <span>Step 1</span>
+                                <strong>Add the basics customers decide from first</strong>
+                                <p>
+                                  Name and price do most of the work. Stock keeps the storefront
+                                  accurate.
+                                </p>
+                              </div>
+                              <div className={`vendor-inline-status ${productBasicsReady ? 'is-ready' : ''}`}>
+                                {productBasicsReady ? 'Ready' : 'Required first'}
+                              </div>
                             </div>
-                          </label>
-                        </div>
 
-                        <label className="vendor-field vendor-field--catalog">
-                          <span>Product details (Optional)</span>
-                          <textarea
-                            style={{ ...inputStyle, minHeight: '110px', resize: 'vertical' }}
-                            placeholder="Tell your customers about the size, flavor, material, or what makes this product special..."
-                            value={productForm.desc}
-                            onChange={(event) =>
-                              setProductForm((current) => ({
-                                ...current,
-                                desc: event.target.value,
-                              }))
-                            }
-                          />
-                          <small>
-                            Provide helpful details to help customers decide. Keep it simple and clear.
-                          </small>
-                        </label>
+                            <div className="vendor-catalog-field-grid">
+                              <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                                <span>Product name</span>
+                                <input
+                                  style={inputStyle}
+                                  placeholder="Organic mango jam"
+                                  value={productForm.name}
+                                  onChange={(event) =>
+                                    setProductForm((current) => ({
+                                      ...current,
+                                      name: event.target.value,
+                                    }))
+                                  }
+                                />
+                                <small>Keep it short and easy for shoppers to recognize.</small>
+                              </label>
+
+                              <label className="vendor-field vendor-field--catalog">
+                                <span>Price customers will see</span>
+                                <input
+                                  style={inputStyle}
+                                  placeholder="$25 or 25 USD"
+                                  value={productForm.price}
+                                  onChange={(event) =>
+                                    setProductForm((current) => ({
+                                      ...current,
+                                      price: event.target.value,
+                                    }))
+                                  }
+                                />
+                                <small>Use the exact price label you want shown on the card.</small>
+                              </label>
+
+                              <label className="vendor-field vendor-field--catalog">
+                                <span>Stock available</span>
+                                <input
+                                  style={inputStyle}
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  placeholder="0"
+                                  value={productForm.stock}
+                                  onChange={(event) =>
+                                    setProductForm((current) => ({
+                                      ...current,
+                                      stock: event.target.value,
+                                    }))
+                                  }
+                                />
+                                <small>Use 0 if you want to finish the draft before selling it.</small>
+                              </label>
+                            </div>
+                          </section>
+
+                          <section className="vendor-catalog-form-section">
+                            <div className="vendor-catalog-form-section__head vendor-catalog-form-section__head--with-status">
+                              <div>
+                                <span>Step 2</span>
+                                <strong>Add one clear photo shoppers can trust</strong>
+                                <p>
+                                  A simple front-facing photo with good light is enough for most
+                                  products.
+                                </p>
+                              </div>
+                              <div className={`vendor-inline-status ${productPhotoReady ? 'is-ready' : ''}`}>
+                                {productPhotoReady ? 'Photo ready' : 'Recommended'}
+                              </div>
+                            </div>
+
+                            <div className="vendor-catalog-media-grid vendor-catalog-media-grid--guided">
+                              <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                                <span>Product photo</span>
+                                <div className="vendor-catalog-upload-panel">
+                                  <div
+                                    className={`vendor-catalog-easy-upload ${productImage ? 'is-ready' : ''}`}
+                                    style={{ cursor: 'pointer' }}
+                                  >
+                                    <input
+                                      ref={productInputRef}
+                                      className="vendor-hidden-input"
+                                      type="file"
+                                      accept="image/png,image/jpeg,image/webp,image/gif"
+                                      onClick={(event) => {
+                                        event.currentTarget.value = '';
+                                      }}
+                                      onChange={(event) =>
+                                        setProductFile(event.target.files?.[0] || null)
+                                      }
+                                    />
+                                    {productImage ? (
+                                      <div className="vendor-catalog-easy-upload__empty vendor-catalog-easy-upload__empty--selected">
+                                        <div className="vendor-catalog-easy-upload__icon">
+                                          <ImagePlus size={32} />
+                                        </div>
+                                        <strong>
+                                          {productFile ? 'New photo selected' : 'Current photo ready'}
+                                        </strong>
+                                        <p>
+                                          {productFile?.name
+                                            ? `${productFile.name} is selected. Use the preview to check how it looks on the card.`
+                                            : 'This product already has a saved photo. Use the preview to decide if you want to change it.'}
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      <div className="vendor-catalog-easy-upload__empty">
+                                        <div className="vendor-catalog-easy-upload__icon">
+                                          <ImagePlus size={32} />
+                                        </div>
+                                        <strong>Choose product photo</strong>
+                                        <p>Tap here to pick a bright and clear photo from your device.</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <small>
+                                    One clean image is enough. You can replace it anytime before
+                                    publishing.
+                                  </small>
+                                </div>
+                              </label>
+
+                              <div className="vendor-catalog-inline-preview">
+                                {productImage ? (
+                                  <img
+                                    src={productImage}
+                                    alt="Inline product preview"
+                                    className="vendor-catalog-inline-preview__image"
+                                  />
+                                ) : (
+                                  <div className="vendor-catalog-inline-preview__empty">
+                                    <Package2 size={24} />
+                                    <strong>Photo preview</strong>
+                                    <p>Add a photo to preview the card on smaller screens.</p>
+                                  </div>
+                                )}
+
+                                <div className="vendor-catalog-inline-preview__meta">
+                                  <strong>{productForm.name || 'Your product card preview'}</strong>
+                                  <span>
+                                    {productForm.price
+                                      ? `${productForm.price} | ${productForm.stock === '' ? 0 : productForm.stock} in stock`
+                                      : 'Add a price to finish the customer-facing card'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </section>
+
+                          <section className="vendor-catalog-form-section">
+                            <div className="vendor-catalog-form-section__head vendor-catalog-form-section__head--with-status">
+                              <div>
+                                <span>Step 3</span>
+                                <strong>Add the optional details that help people decide</strong>
+                                <p>
+                                  These finishing touches are helpful, but they can stay simple.
+                                </p>
+                              </div>
+                              <div className={`vendor-inline-status ${productExtrasReady ? 'is-ready' : ''}`}>
+                                {productExtrasReady ? 'Details added' : 'Optional'}
+                              </div>
+                            </div>
+
+                            <div className="vendor-catalog-field-grid">
+                              <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                                <span>Promotion label</span>
+                                <input
+                                  style={inputStyle}
+                                  placeholder="20% OFF"
+                                  value={productForm.discountBanner}
+                                  onChange={(event) =>
+                                    setProductForm((current) => ({
+                                      ...current,
+                                      discountBanner: event.target.value,
+                                    }))
+                                  }
+                                />
+                                <small>
+                                  Optional. Add this only when you want a short label on the
+                                  product card.
+                                </small>
+                              </label>
+
+                              <label className="vendor-field vendor-field--catalog vendor-field--catalog-wide">
+                                <span>Helpful details for customers</span>
+                                <textarea
+                                  style={{ ...inputStyle, minHeight: '104px', resize: 'vertical' }}
+                                  placeholder="Size, flavor, material, or what makes this product special..."
+                                  value={productForm.desc}
+                                  onChange={(event) =>
+                                    setProductForm((current) => ({
+                                      ...current,
+                                      desc: event.target.value,
+                                    }))
+                                  }
+                                />
+                                <small>
+                                  Keep it simple. A sentence or two is enough to answer the most
+                                  common questions.
+                                </small>
+                              </label>
+                            </div>
+                          </section>
+                        </div>
                       </div>
 
                       <div className="vendor-catalog-submit-bar">
@@ -3810,28 +3571,6 @@ export default function VendorApp() {
                     </div>
                   </div>
 
-                  <div className="vendor-share-hints">
-                    <div className="vendor-note-card">
-                      <span>Handle</span>
-                      <strong>/{displayHandle}</strong>
-                      <p>This is the exact public path customers will use when they visit your shop.</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Location</span>
-                      <strong>{previewLocation}</strong>
-                      <p>Customers can understand your city, pickup point, or delivery area before they message you.</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Catalog status</span>
-                      <strong>{products.length} product{products.length === 1 ? '' : 's'} live</strong>
-                      <p>{products.length > 0 ? 'Your storefront has items to browse.' : 'Add at least one product before promoting the link broadly.'}</p>
-                    </div>
-                    <div className="vendor-note-card">
-                      <span>Contact channel</span>
-                      <strong>{shopForm.telegram ? previewTelegram : 'Missing Telegram'}</strong>
-                      <p>Make sure customers know how to reach you after opening the storefront.</p>
-                    </div>
-                  </div>
                 </section>
               </div>
             )}
@@ -3841,4 +3580,3 @@ export default function VendorApp() {
     </div>
   );
 }
-
