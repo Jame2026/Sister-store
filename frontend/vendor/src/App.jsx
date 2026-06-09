@@ -30,6 +30,7 @@ const EMPTY_AUTH = {
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '')
 ).replace(/\/$/, '');
+const PAYMENT_QR_URL = '/payment-qr.png';
 const EMPTY_SHOP = {
   name: '',
   description: '',
@@ -299,11 +300,6 @@ function apiUrl(path) {
   return `${API_BASE_URL}${path}`;
 }
 
-async function fetchPaymentQrUrl() {
-  const payload = await readApiResponse(await fetch(apiUrl('/api/vendor/auth/payment-qr')));
-  return resolveApiAssetUrl(payload.url || '');
-}
-
 function previewUrl(file) {
   return file ? URL.createObjectURL(file) : '';
 }
@@ -386,10 +382,8 @@ export default function VendorApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
   const [resetDetails, setResetDetails] = useState(null);
-  const [paymentQrUrl, setPaymentQrUrl] = useState('');
   const [paymentQrError, setPaymentQrError] = useState('');
-  const [paymentQrLoading, setPaymentQrLoading] = useState(false);
-  const [showRegistrationQr, setShowRegistrationQr] = useState(false);
+  const [showRegistrationQr, setShowRegistrationQr] = useState(true);
   const [passwordVisibility, setPasswordVisibility] = useState({
     password: false,
     confirmPassword: false,
@@ -952,9 +946,7 @@ export default function VendorApp() {
     setAccount(null);
     setAuthError('');
     setResetDetails(null);
-    setPaymentQrUrl('');
     setPaymentQrError('');
-    setPaymentQrLoading(false);
     setShowRegistrationQr(false);
     setPasswordVisibility({
       password: false,
@@ -972,10 +964,8 @@ export default function VendorApp() {
     setAuthMode(nextMode);
     setAuthError('');
     setResetDetails(null);
-    setPaymentQrUrl('');
     setPaymentQrError('');
-    setPaymentQrLoading(false);
-    setShowRegistrationQr(false);
+    setShowRegistrationQr(nextMode === 'register');
     setPasswordVisibility({
       password: false,
       confirmPassword: false,
@@ -1007,14 +997,9 @@ export default function VendorApp() {
           type={isVisible ? 'text' : 'password'}
           placeholder={placeholder}
           value={authForm[field]}
-          onChange={(event) => {
-            if (authMode === 'register' && showRegistrationQr) {
-              setShowRegistrationQr(false);
-              setNotice('');
-            }
-
-            setAuthForm((current) => ({ ...current, [field]: event.target.value }));
-          }}
+          onChange={(event) =>
+            setAuthForm((current) => ({ ...current, [field]: event.target.value }))
+          }
         />
         <button
           type="button"
@@ -1140,41 +1125,6 @@ export default function VendorApp() {
   }, [account, canPublishProducts, token]);
 
   useEffect(() => {
-    if (authMode !== 'register' || !showRegistrationQr || paymentQrUrl || paymentQrLoading) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadPaymentQr() {
-      setPaymentQrLoading(true);
-      setPaymentQrError('');
-
-      try {
-        const nextPaymentQrUrl = await fetchPaymentQrUrl();
-        if (!cancelled) {
-          setPaymentQrUrl(nextPaymentQrUrl);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setPaymentQrUrl('');
-          setPaymentQrError(error.message || 'Unable to load the payment QR image.');
-        }
-      } finally {
-        if (!cancelled) {
-          setPaymentQrLoading(false);
-        }
-      }
-    }
-
-    loadPaymentQr();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authMode, paymentQrLoading, paymentQrUrl, showRegistrationQr]);
-
-  useEffect(() => {
     if (!accountMenuOpen) {
       return undefined;
     }
@@ -1277,20 +1227,10 @@ export default function VendorApp() {
           throw new Error('Passwords do not match.');
         }
 
-        if (!showRegistrationQr) {
-          setPaymentQrUrl('');
-          setPaymentQrError('');
-          setPaymentQrLoading(false);
-          setShowRegistrationQr(true);
-          setNotice(
-            `Your details look good. Scan the QR for ${selectedSubscriptionPlan.priceLabel} ${selectedSubscriptionPlan.cadenceLabel}, then click "I Paid, Create Vendor Account" to finish.`
-          );
-          return;
-        }
-
         if (paymentQrError) {
           throw new Error(paymentQrError);
         }
+
       }
 
       setAuthBusy(true);
@@ -1770,11 +1710,6 @@ export default function VendorApp() {
                           key={plan.code}
                           type="button"
                           onClick={() => {
-                            if (showRegistrationQr) {
-                              setShowRegistrationQr(false);
-                              setNotice('');
-                            }
-
                             setAuthForm((current) => ({
                               ...current,
                               subscriptionPlan: plan.code,
@@ -1844,32 +1779,23 @@ export default function VendorApp() {
                             padding: '14px',
                           }}
                         >
-                          {paymentQrLoading ? (
-                            <div style={{ color: LIGHT_THEME.text, fontWeight: 600 }}>
-                              Loading payment QR...
-                            </div>
-                          ) : paymentQrUrl ? (
-                            <img
-                              src={paymentQrUrl}
-                              alt="Vendor payment QR code"
-                              onError={() =>
-                                setPaymentQrError(
-                                  'The payment QR image could not be loaded from the backend.'
-                                )
-                              }
-                              style={{
-                                width: '100%',
-                                maxWidth: '240px',
-                                height: 'auto',
-                                display: 'block',
-                                borderRadius: '10px',
-                              }}
-                            />
-                          ) : (
-                            <div style={{ color: LIGHT_THEME.text, fontWeight: 600 }}>
-                              Waiting for payment QR...
-                            </div>
-                          )}
+                          <img
+                            src={PAYMENT_QR_URL}
+                            alt="Vendor payment QR code"
+                            onLoad={() => setPaymentQrError('')}
+                            onError={() =>
+                              setPaymentQrError(
+                                'The payment QR image could not be loaded from the frontend.'
+                              )
+                            }
+                            style={{
+                              width: '100%',
+                              maxWidth: '240px',
+                              height: 'auto',
+                              display: 'block',
+                              borderRadius: '10px',
+                            }}
+                          />
                         </div>
                       ) : (
                         <div
@@ -1910,10 +1836,6 @@ export default function VendorApp() {
                       const nextEmail = event.target.value;
                       if (authMode === 'forgot' && resetDetails) {
                         setResetDetails(null);
-                      }
-                      if (authMode === 'register' && showRegistrationQr) {
-                        setShowRegistrationQr(false);
-                        setNotice('');
                       }
                       setAuthForm((current) => ({ ...current, email: nextEmail }));
                     }}
