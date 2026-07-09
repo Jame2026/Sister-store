@@ -74,135 +74,49 @@ if (cloudinaryEnabled) {
 }
 
 
-const allowedOriginPatterns = allowedOriginEntries
-  .map((value) => buildOriginPattern(value))
-  .filter(Boolean);
-const filteredOrigins = allowedOriginEntries.filter((value) => !value.includes('*'));
-const localDevelopmentOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
-
-function isAllowedOrigin(origin) {
-  if (!origin) {
-    return true;
-  }
-
-  // Allow localhost development
-  if (localDevelopmentOriginPattern.test(origin)) {
-    return true;
-  }
-
-  // Allow origins from FRONTEND_ORIGINS in .env
-  if (allowedOriginEntries.includes(origin)) {
-    return true;
-  }
-
-  // Allow wildcard origins from FRONTEND_ORIGINS
-  if (allowedOriginPatterns.some((pattern) => pattern.test(origin))) {
-    return true;
-  }
-
-  // Optional: allow all Vercel preview deployments
-  if (origin.endsWith('.vercel.app')) {
-    return true;
-  }
-
-  return false;
-}
-
-
-
 const allowedOriginEntries = (process.env.FRONTEND_ORIGINS || '')
-
   .split(',')
-
   .map(origin => origin.trim())
-
   .filter(Boolean);
-
-
 
 function escapeRegex(value) {
-
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 }
-
-
 
 function buildOriginPattern(value) {
-
   if (!value.includes('*')) {
-
     return null;
-
   }
 
-
-
-  return new RegExp(
-
-    `^${escapeRegex(value).replace(/\\\*/g, '.*')}$`
-
-  );
-
+  return new RegExp(`^${escapeRegex(value).replace(/\\\*/g, '.*')}$`);
 }
-
-
 
 const allowedOriginPatterns = allowedOriginEntries
-
   .map(buildOriginPattern)
-
   .filter(Boolean);
 
-
-
 function isAllowedOrigin(origin) {
-
-  // Allow requests without Origin (curl, Postman, server-to-server)
-
   if (!origin) {
-
     return true;
-
   }
 
-
-
   return allowedOriginEntries.includes(origin) ||
-
          allowedOriginPatterns.some(pattern => pattern.test(origin));
-
 }
 
-
-
 const corsOptions = {
-
   origin(origin, callback) {
-
     if (isAllowedOrigin(origin)) {
-
       return callback(null, true);
-
     }
 
-
-
     console.log('Blocked Origin:', origin);
-
     console.log('Allowed Origins:', allowedOriginEntries);
 
-
-
     return callback(new Error('Not allowed by CORS'));
-
   },
-
   credentials: true,
-
 };
-
-
 
 
 
