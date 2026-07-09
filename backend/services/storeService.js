@@ -73,21 +73,6 @@ if (cloudinaryEnabled) {
   });
 }
 
-const allowedOriginEntries = (process.env.FRONTEND_ORIGINS || '')
-  .split(',')
-  .map(origin => origin.trim())
-  .filter(Boolean);
-function escapeRegex(value) {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function buildOriginPattern(value) {
-  if (!value.includes('*')) {
-    return null;
-  }
-
-  return new RegExp(`^${escapeRegex(value).replace(/\\\*/g, '.*')}$`);
-}
 
 const allowedOriginPatterns = allowedOriginEntries
   .map((value) => buildOriginPattern(value))
@@ -115,17 +100,105 @@ function isAllowedOrigin(origin) {
   return origin.endsWith('.vercel.app');
 }
 
+
+
+
+
+const allowedOriginEntries = (process.env.FRONTEND_ORIGINS || '')
+
+  .split(',')
+
+  .map(origin => origin.trim())
+
+  .filter(Boolean);
+
+
+
+function escapeRegex(value) {
+
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+}
+
+
+
+function buildOriginPattern(value) {
+
+  if (!value.includes('*')) {
+
+    return null;
+
+  }
+
+
+
+  return new RegExp(
+
+    `^${escapeRegex(value).replace(/\\\*/g, '.*')}$`
+
+  );
+
+}
+
+
+
+const allowedOriginPatterns = allowedOriginEntries
+
+  .map(buildOriginPattern)
+
+  .filter(Boolean);
+
+
+
+function isAllowedOrigin(origin) {
+
+  // Allow requests without Origin (curl, Postman, server-to-server)
+
+  if (!origin) {
+
+    return true;
+
+  }
+
+
+
+  return allowedOriginEntries.includes(origin) ||
+
+         allowedOriginPatterns.some(pattern => pattern.test(origin));
+
+}
+
+
+
 const corsOptions = {
+
   origin(origin, callback) {
+
     if (isAllowedOrigin(origin)) {
-      callback(null, true);
-      return;
+
+      return callback(null, true);
+
     }
 
-    callback(new Error('Not allowed by CORS'));
+
+
+    console.log('Blocked Origin:', origin);
+
+    console.log('Allowed Origins:', allowedOriginEntries);
+
+
+
+    return callback(new Error('Not allowed by CORS'));
+
   },
+
   credentials: true,
+
 };
+
+
+
+
 
 const allowedImageMimeTypes = new Set([
   'image/jpeg',
