@@ -74,9 +74,9 @@ if (cloudinaryEnabled) {
 }
 
 
-const allowedOriginEntries = (process.env.FRONTEND_ORIGINS || '')
+const allowedOriginEntries = readOptionalEnvValue('FRONTEND_ORIGINS')
   .split(',')
-  .map(origin => origin.trim())
+  .map((origin) => origin.trim())
   .filter(Boolean);
 
 function escapeRegex(value) {
@@ -95,13 +95,31 @@ const allowedOriginPatterns = allowedOriginEntries
   .map(buildOriginPattern)
   .filter(Boolean);
 
+const localDevelopmentOriginPattern =
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
 function isAllowedOrigin(origin) {
+  // Allow curl/Postman/server-to-server requests
   if (!origin) {
     return true;
   }
 
-  return allowedOriginEntries.includes(origin) ||
-         allowedOriginPatterns.some(pattern => pattern.test(origin));
+  // Allow localhost during development
+  if (localDevelopmentOriginPattern.test(origin)) {
+    return true;
+  }
+
+  // Exact matches from FRONTEND_ORIGINS
+  if (allowedOriginEntries.includes(origin)) {
+    return true;
+  }
+
+  // Wildcard matches from FRONTEND_ORIGINS
+  if (allowedOriginPatterns.some((pattern) => pattern.test(origin))) {
+    return true;
+  }
+
+  return false;
 }
 
 const corsOptions = {
