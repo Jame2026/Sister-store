@@ -85,22 +85,28 @@ function isAllowedOrigin(origin) {
     return true;
   }
 
+  // Allow localhost development
   if (localDevelopmentOriginPattern.test(origin)) {
     return true;
   }
 
-  if (filteredOrigins.includes(origin)) {
+  // Allow origins from FRONTEND_ORIGINS in .env
+  if (allowedOriginEntries.includes(origin)) {
     return true;
   }
 
+  // Allow wildcard origins from FRONTEND_ORIGINS
   if (allowedOriginPatterns.some((pattern) => pattern.test(origin))) {
     return true;
   }
 
-  return origin.endsWith('.vercel.app');
+  // Optional: allow all Vercel preview deployments
+  if (origin.endsWith('.vercel.app')) {
+    return true;
+  }
+
+  return false;
 }
-
-
 
 
 
