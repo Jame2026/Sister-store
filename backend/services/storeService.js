@@ -73,22 +73,10 @@ if (cloudinaryEnabled) {
   });
 }
 
-const defaultAllowedOrigins = [
-  'https://online-store-three-xi.vercel.app',
-  'https://vendor-store-beta.vercel.app',
-  'https://customer-store.vercel.app',
-
-  'https://online-store-kjqz70bk3-jamekhouen-8551s-projects.vercel.app'
-];
-
-const configuredAllowedOriginEntries = readOptionalEnvValue('FRONTEND_ORIGINS')
+const allowedOriginEntries = (process.env.FRONTEND_ORIGINS || '')
   .split(',')
-  .map((value) => value.trim())
+  .map(origin => origin.trim())
   .filter(Boolean);
-const allowedOriginEntries = configuredAllowedOriginEntries.length
-  ? configuredAllowedOriginEntries
-  : defaultAllowedOrigins;
-
 function escapeRegex(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
